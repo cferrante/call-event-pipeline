@@ -161,6 +161,16 @@ and you can start and stop NATS and Postgres yourself.
   reproduces the exact form the signature was computed over.
 - **Step 3: `envelope.Parse` validates events read from the stream.** Its errors mark messages
   that can never succeed, which step 8 sends to the dead-letter queue instead of retrying.
+- **Step 5 was done before step 4.** They're independent: step 4's handler uses a fake
+  publisher, and step 5 builds the real one.
+- **Step 5: integration tests start their own `nats-server`** (`internal/natstest`), using the
+  installed binary on a free port with a temporary data directory, and skip if it isn't
+  installed. Each test gets a clean JetStream, and you don't have to start NATS first.
+  Embedding the server as a Go library was rejected because it pulls the whole server into
+  the module's dependencies.
+- **Step 5: "publish twice → one message" is joined by "existing stream with an old config is
+  updated".** Creating an identical stream twice already succeeds in JetStream, so a plain
+  idempotence test couldn't tell a correct implementation from a wrong one.
 
 ## Code-review outcomes
 
