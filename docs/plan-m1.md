@@ -141,7 +141,13 @@ and you can start and stop NATS and Postgres yourself.
 
 ## Deviations from the plan
 
-_None yet._
+- **Step 1: directories are created when a step first needs them**, not all up front. Git
+  doesn't track empty directories, so creating the whole layout now would mean committing
+  placeholder files.
+- **Step 1: the first test is `GET /healthz`**, not a throwaway test. It's real code the
+  ingest service needs (see the [ingest edge in the spec](design.md#51-ingest-edge-cmdingest)).
+- **Step 1: `INGEST_PORT` was added now instead of in step 10**, because port 8080 is already in
+  use on the dev machine. It defaults to 8080 and rejects invalid values at startup.
 
 ## Code-review outcomes
 
