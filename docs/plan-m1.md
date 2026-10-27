@@ -194,6 +194,9 @@ and you can start and stop NATS and Postgres yourself.
   instead of a shared `leads_test`, for the same reasons as one NATS server per test.
 - **Step 6: `interactions.from_e164` is named `from_number`**, because for anonymous callers
   it holds words like `anonymous`, which aren't E.164 numbers.
+- **Step 7: the interaction is inserted before the lead is touched**, reversing the spec's
+  original order, so a redelivered message is a complete no-op. See
+  [delivery guarantees](design.md#55-delivery-guarantees).
 
 ## Code-review outcomes
 
