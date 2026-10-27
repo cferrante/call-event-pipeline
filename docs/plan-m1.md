@@ -171,6 +171,16 @@ and you can start and stop NATS and Postgres yourself.
 - **Step 5: "publish twice → one message" is joined by "existing stream with an old config is
   updated".** Creating an identical stream twice already succeeds in JetStream, so a plain
   idempotence test couldn't tell a correct implementation from a wrong one.
+- **Step 4: the signed URL is built from a configured public base URL**, not from the request's
+  own host and scheme. Behind a tunnel or proxy the server sees e.g. `http://localhost:8081`
+  while Twilio signed `https://<public host>`, so every signature would fail.
+- **Step 4: two responses the spec didn't list.** A signed webhook that can't become an event
+  (e.g. no `CallSid`) gets 400, because a retry would fail the same way. Publishing has a
+  5-second deadline, well inside Twilio's 15-second timeout, so a stalled stream can't hold
+  requests open.
+- **Step 4: the handler returns whatever TwiML it's given.** Choosing it (e.g. `<Dial>` to a
+  forwarding number) moves to step 10 with the rest of the wiring, as does the
+  `TWILIO_AUTH_TOKEN` / `.env` setup.
 
 ## Code-review outcomes
 
