@@ -180,7 +180,20 @@ and you can start and stop NATS and Postgres yourself.
   requests open.
 - **Step 4: the handler returns whatever TwiML it's given.** Choosing it (e.g. `<Dial>` to a
   forwarding number) moves to step 10 with the rest of the wiring, as does the
-  `TWILIO_AUTH_TOKEN` / `.env` setup.
+  `TWILIO_AUTH_TOKEN` setup.
+- **Step 6: the app connects as a least-privilege `leads_app` role**, not the developer's
+  superuser login. `scripts/db-setup.sh` creates it and the `leads` database it owns. It has
+  `CREATEDB` so tests can create throwaway databases; a production role wouldn't.
+- **Step 6: `.env` / `.env.example` arrived now instead of step 10**, because `leads_app`'s
+  password lives in `DATABASE_URL`.
+- **Step 6: migrations run from Go (`internal/migrate`, `cmd/migrate`), not a `psql` script.**
+  The SQL files are embedded in the binary and recorded in `schema_migrations`, so the
+  migrator could be built test-first and runs anywhere without `psql`. An advisory lock lets
+  services start at the same time safely.
+- **Step 6: each integration test gets its own throwaway database** (`internal/dbtest`)
+  instead of a shared `leads_test`, for the same reasons as one NATS server per test.
+- **Step 6: `interactions.from_e164` is named `from_number`**, because for anonymous callers
+  it holds words like `anonymous`, which aren't E.164 numbers.
 
 ## Code-review outcomes
 
