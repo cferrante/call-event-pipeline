@@ -148,6 +148,10 @@ and you can start and stop NATS and Postgres yourself.
   ingest service needs (see the [ingest edge in the spec](design.md#51-ingest-edge-cmdingest)).
 - **Step 1: `INGEST_PORT` was added now instead of in step 10**, because port 8080 is already in
   use on the dev machine. It defaults to 8080 and rejects invalid values at startup.
+- **Step 2: signatures are checked with and without the default port.** Twilio's docs say
+  voice-over-HTTPS URLs are signed without the port but SMS URLs keep it, so the URL we
+  rebuild may differ from the signed one by `:443`/`:80`. Twilio's own helper libraries do the
+  same. A different *non-default* port is still rejected.
 
 ## Code-review outcomes
 
