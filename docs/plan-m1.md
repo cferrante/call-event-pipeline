@@ -152,6 +152,15 @@ and you can start and stop NATS and Postgres yourself.
   voice-over-HTTPS URLs are signed without the port but SMS URLs keep it, so the URL we
   rebuild may differ from the signed one by `:443`/`:80`. Twilio's own helper libraries do the
   same. A different *non-default* port is still rejected.
+- **Step 3: "anonymous caller" is broader than the spec's `Anonymous`/blank.** Twilio sends a
+  word such as `anonymous` or `unknown` in `From`, and has also used keypad numbers for those
+  words (ANONYMOUS → `+266696687`). A caller is anonymous if `From` is blank, isn't an E.164
+  number, or is one of those keypad numbers (derived in code from the words).
+- **Step 3: `params` is stored as name → list of values** (Go's `url.Values`), not name →
+  string as sketched in the [spec's event schema](design.md#6-event-schema), so a replay
+  reproduces the exact form the signature was computed over.
+- **Step 3: `envelope.Parse` validates events read from the stream.** Its errors mark messages
+  that can never succeed, which step 8 sends to the dead-letter queue instead of retrying.
 
 ## Code-review outcomes
 
