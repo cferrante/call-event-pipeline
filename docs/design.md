@@ -114,8 +114,9 @@ can slow the edge, because the stream sits between them.
 - Error handling:
   - **Transient** (DB down, timeout) → `Nak` with delay; JetStream redelivers.
   - **Permanent** (unparseable envelope) → publish to `leads.dlq`, then `Term`.
-  - **Retries exhausted** (`MaxDeliver`) → copied to `leads.dlq` by listening to the JetStream
-    max-deliveries advisory.
+  - **Retries exhausted** → on the final attempt (`MaxDeliver` = 5) the worker publishes to
+    `leads.dlq` itself, then `Term`. It doesn't rely on JetStream's max-deliveries advisory,
+    which is an unstored message lost if no listener is running at that moment.
 
 ### 5.4 Inference consumer (M2, sketch only)
 
@@ -271,3 +272,8 @@ Known limitations (deliberately out of M1):
   interaction stores its campaign at write time.
 - **Replies to our own outreach** look like inbound contacts until outbound calls/SMS are
   ingested.
+- **A worker crash during a message's final attempt** leaves that message undelivered but out of
+  the DLQ: JetStream won't redeliver it, and no worker is left to dead-letter it. The same
+  happens if the DLQ write itself fails on the final attempt. The message isn't lost (it stays
+  in `LEADS` for 7 days) and consumer metrics show it. The upgrade path is to capture
+  JetStream's max-deliveries advisories in their own stream and dead-letter from there.

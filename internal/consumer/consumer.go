@@ -33,6 +33,8 @@ const (
 	// recordTimeout keeps one attempt shorter than ackWait, so a stuck attempt fails and is
 	// retried by us rather than redelivered while it is still running.
 	recordTimeout = 20 * time.Second
+	// maxDeliver is the most attempts a message gets.
+	maxDeliver = 5
 )
 
 // defaultRetryDelays grow with each attempt; the last one repeats.
@@ -60,7 +62,7 @@ func EnsureConsumer(ctx context.Context, js jetstream.JetStream) (jetstream.Cons
 		Durable:    ConsumerName,
 		AckPolicy:  jetstream.AckExplicitPolicy,
 		AckWait:    ackWait,
-		MaxDeliver: 5,
+		MaxDeliver: maxDeliver,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ensure consumer %s: %w", ConsumerName, err)
@@ -103,6 +105,12 @@ func (h *Handler) Handle(ctx context.Context, msg jetstream.Msg) {
 	recordCtx, cancel := context.WithTimeout(ctx, recordTimeout)
 	defer cancel()
 	if _, err := h.rec.Record(recordCtx, env); err != nil {
+		// On the final attempt JetStream won't redeliver, so dead-letter it ourselves rather
+		// than rely on its MaxDeliver advisory, which is lost if nobody is listening.
+		if n := attempt(msg); n >= maxDeliver {
+			h.deadLetter(ctx, msg, fmt.Errorf("gave up after %d attempts: %w", n, err))
+			return
+		}
 		delay := h.retryDelay(msg)
 		slog.Warn("record failed; will retry", "provider_id", env.ProviderID, "delay", delay, "err", err)
 		if err := msg.NakWithDelay(delay); err != nil {
@@ -141,9 +149,13 @@ func (h *Handler) deadLetter(ctx context.Context, msg jetstream.Msg, cause error
 
 // retryDelay picks the delay for this message's attempt number.
 func (h *Handler) retryDelay(msg jetstream.Msg) time.Duration {
-	attempt := 1
+	return h.retryDelays[min(attempt(msg), len(h.retryDelays))-1]
+}
+
+// attempt is the message's delivery count: 1 on first delivery.
+func attempt(msg jetstream.Msg) int {
 	if meta, err := msg.Metadata(); err == nil {
-		attempt = int(meta.NumDelivered)
+		return int(meta.NumDelivered)
 	}
-	return h.retryDelays[min(attempt, len(h.retryDelays))-1]
+	return 1
 }

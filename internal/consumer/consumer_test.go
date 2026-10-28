@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"net/url"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -255,5 +256,46 @@ func TestMessageIsStoredInPostgres(t *testing.T) {
 	}
 	if n != 2 {
 		t.Errorf("interactions = %d, want 2", n)
+	}
+}
+
+// A failure that never clears is dead-lettered on the final attempt, by the worker itself,
+// so it reaches the DLQ even though nothing listens for JetStream's MaxDeliver advisory.
+func TestFailureOnFinalAttemptIsDeadLettered(t *testing.T) {
+	rec := &fakeRecorder{failures: 1000, result: true}
+	h := start(t, rec)
+
+	h.publish(t, "CA1")
+	info := h.waitSettled(t)
+
+	if rec.callCount() != maxDeliver {
+		t.Errorf("Record called %d times, want %d", rec.callCount(), maxDeliver)
+	}
+	if info.Delivered.Consumer != maxDeliver {
+		t.Errorf("deliveries = %d, want %d", info.Delivered.Consumer, maxDeliver)
+	}
+	dlq := h.dlqMessages(t)
+	if len(dlq) != 1 {
+		t.Fatalf("dead-lettered %d messages, want 1", len(dlq))
+	}
+	reason := dlq[0].Header.Get(HeaderReason)
+	if !strings.Contains(reason, "5 attempts") || !strings.Contains(reason, "database unavailable") {
+		t.Errorf("%s = %q, want the attempt count and the last error", HeaderReason, reason)
+	}
+}
+
+// Succeeding on the last allowed attempt is a success, not a dead letter.
+func TestSuccessOnFinalAttemptIsRecorded(t *testing.T) {
+	rec := &fakeRecorder{failures: maxDeliver - 1, result: true}
+	h := start(t, rec)
+
+	h.publish(t, "CA1")
+	h.waitSettled(t)
+
+	if rec.callCount() != maxDeliver {
+		t.Errorf("Record called %d times, want %d", rec.callCount(), maxDeliver)
+	}
+	if n := len(h.dlqMessages(t)); n != 0 {
+		t.Errorf("dead-lettered %d messages, want 0", n)
 	}
 }

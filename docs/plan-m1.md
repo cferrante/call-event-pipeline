@@ -209,6 +209,11 @@ and you can start and stop NATS and Postgres yourself.
   real NATS server; `cmd/attribution` only wires it up (step 10).
 - **Step 8: each attempt is limited to 20s,** below the 30s `AckWait`, so a stuck attempt fails
   and is retried by us instead of being redelivered while it's still running.
+- **Step 9: the worker dead-letters on the final attempt itself, instead of listening for
+  JetStream's max-deliveries advisory.** Advisories aren't stored, so any sent while the
+  service is down or restarting would be missed. The remaining gap (a crash *during* the final
+  attempt) is a known limitation in the
+  [spec](design.md#12-decisions-and-known-limitations), with the upgrade path.
 
 ## Code-review outcomes
 
