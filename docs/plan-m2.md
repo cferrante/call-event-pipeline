@@ -154,6 +154,9 @@ dual write and transactional outbox were added with this plan.)
   (1 failure in 10 runs under the race detector). The flush is a round trip, which guarantees
   earlier acks have arrived; 30 of 30 runs pass. Production already drains the connection
   before exiting (M1 code-review finding 5).
+- **Step 5: shared settings moved to `internal/env`** (default NATS URL, the required
+  `DATABASE_URL` check, password redaction). The inference service would have been the third
+  copy of each; M1 declined this extraction (code-review finding 9) until a third copy appeared.
 
 ## Code-review outcomes
 
