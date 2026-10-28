@@ -76,3 +76,17 @@ func TestConfigLogValueHidesDatabasePassword(t *testing.T) {
 		t.Errorf("logged config = %s, want workers shown and the password hidden", got)
 	}
 }
+
+// Workers should match the model's capacity, so by default they follow it.
+func TestWorkersDefaultToModelCapacity(t *testing.T) {
+	setValidEnv(t)
+	t.Setenv("MODEL_CAPACITY", "8")
+
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("loadConfig: %v", err)
+	}
+	if cfg.workers != 8 {
+		t.Errorf("workers = %d, want 8 (MODEL_CAPACITY)", cfg.workers)
+	}
+}

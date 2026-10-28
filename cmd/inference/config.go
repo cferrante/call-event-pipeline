@@ -16,7 +16,7 @@ type config struct {
 	databaseURL string // DATABASE_URL
 	natsURL     string // NATS_URL
 	// workers is INFERENCE_WORKERS: messages handled at once, and the consumer's MaxAckPending.
-	// It should match the model's capacity, so the model is never sent more than it can serve.
+	// It defaults to the model's capacity, so the model is never sent more than it can serve.
 	workers int
 	model   inference.StubConfig // MODEL_CAPACITY, MODEL_LATENCY, MODEL_TIMEOUT
 }
@@ -27,10 +27,10 @@ func loadConfig() (config, error) {
 		return config{}, err
 	}
 	cfg := config{databaseURL: dbURL, natsURL: env.NATSURL(), model: inference.DefaultStubConfig}
-	if cfg.workers, err = positiveInt("INFERENCE_WORKERS", 4); err != nil {
+	if cfg.model.Capacity, err = positiveInt("MODEL_CAPACITY", cfg.model.Capacity); err != nil {
 		return config{}, err
 	}
-	if cfg.model.Capacity, err = positiveInt("MODEL_CAPACITY", cfg.model.Capacity); err != nil {
+	if cfg.workers, err = positiveInt("INFERENCE_WORKERS", cfg.model.Capacity); err != nil {
 		return config{}, err
 	}
 	if cfg.model.BaseLatency, err = positiveDuration("MODEL_LATENCY", cfg.model.BaseLatency); err != nil {
