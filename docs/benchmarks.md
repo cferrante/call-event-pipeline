@@ -12,6 +12,7 @@ Numbers are only comparable between rows with the same machine.
 | Date | Commit | Machine | Load | Edge p50 / p99 | Errors | Peak lag | Drained after | Accepted = rows | Dead letters |
 |---|---|---|---|---|---|---|---|---|---|
 | 2026-10-28 | `2f7278d` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s | 0.42 / 1.03 ms | 0.000% | 22675 | 27s | ✓ 67499 | 0 |
+| 2026-10-28 | `607534e` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s | 0.47 / 2.02 ms | 0.000% | 27123 | 37s | ✓ 67499 | 0 |
 
 Columns: **Load** is peak rate, ramp and hold. **Edge** latency is k6's view of the ingest
 service. **Peak lag** is the attribution consumer's largest backlog, and **Drained after** is how
@@ -45,3 +46,12 @@ throughout because it only waits for JetStream.
 **Run-to-run variance.** An earlier run of the same scripts (on uncommitted code, so not in
 the table) peaked at 28,134 messages and drained in 37s. Expect differences of about 20–25%
 between identical runs on a laptop; compare several runs before concluding a change helped.
+
+### 2026-10-28, `607534e`: client pulls 10 messages at a time
+
+Change: the attribution consumer pulls at most 10 messages per batch instead of up to 500
+(code-review finding 3), so buffered messages can't expire before they're handled.
+
+Peak lag 27,123 and drain 37s, against the baseline's 22,675 and 27s. That's within the
+run-to-run variance noted above: an earlier run of the old code peaked at 28,134 and also
+drained in 37s. **No measurable change in throughput**; the edge was unaffected (p99 2.0 ms).
