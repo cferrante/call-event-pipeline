@@ -20,11 +20,13 @@ import (
 	"strconv"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"syscall"
 	"testing"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/cferrante/decoupled-ingestion-layer/internal/dbtest"
 	"github.com/cferrante/decoupled-ingestion-layer/internal/natstest"
@@ -77,22 +79,33 @@ func (s *syncBuffer) String() string {
 }
 
 type process struct {
-	name string
-	cmd  *exec.Cmd
-	out  *syncBuffer
-	done chan error
+	name   string
+	cmd    *exec.Cmd
+	out    *syncBuffer
+	done   chan error
+	exited atomic.Bool
 }
 
 // start runs bin with only the given environment (plus PATH), and stops it when the test ends.
 func start(t *testing.T, name, bin string, env ...string) *process {
 	t.Helper()
-	p := &process{name: name, cmd: exec.Command(bin), out: &syncBuffer{}, done: make(chan error, 1)}
+	return startArgs(t, name, bin, nil, env...)
+}
+
+// startArgs is start with command-line arguments.
+func startArgs(t *testing.T, name, bin string, args []string, env ...string) *process {
+	t.Helper()
+	p := &process{name: name, cmd: exec.Command(bin, args...), out: &syncBuffer{}, done: make(chan error, 1)}
 	p.cmd.Env = append([]string{"PATH=" + os.Getenv("PATH")}, env...)
 	p.cmd.Stdout, p.cmd.Stderr = p.out, p.out
 	if err := p.cmd.Start(); err != nil {
 		t.Fatalf("start %s: %v", name, err)
 	}
-	go func() { p.done <- p.cmd.Wait() }()
+	go func() {
+		err := p.cmd.Wait()
+		p.exited.Store(true)
+		p.done <- err
+	}()
 	t.Cleanup(func() {
 		if p.cmd.ProcessState == nil {
 			_ = p.cmd.Process.Kill()
@@ -123,6 +136,7 @@ func (p *process) stop(t *testing.T) {
 
 type env struct {
 	natsURL, dbURL string
+	js             jetstream.JetStream
 	db             *pgxpool.Pool
 	ingestPort     int
 }
@@ -130,8 +144,12 @@ type env struct {
 func setup(t *testing.T) env {
 	t.Helper()
 	nc := natstest.Start(t)
-	db := dbtest.Empty(t) // the attribution service applies migrations itself
-	return env{natsURL: nc.ConnectedUrl(), dbURL: db.Config().ConnString(), db: db, ingestPort: freePort(t)}
+	js, err := jetstream.New(nc)
+	if err != nil {
+		t.Fatalf("jetstream: %v", err)
+	}
+	db := dbtest.Empty(t) // the services apply migrations themselves
+	return env{natsURL: nc.ConnectedUrl(), dbURL: db.Config().ConnString(), js: js, db: db, ingestPort: freePort(t)}
 }
 
 func (e env) publicURL() string { return "http://127.0.0.1:" + strconv.Itoa(e.ingestPort) }
@@ -164,13 +182,18 @@ func (e env) startAttribution(t *testing.T) *process {
 	return p
 }
 
-// startInference runs the inference service with a fast model, so tests don't wait on it.
-func (e env) startInference(t *testing.T) *process {
+// startInference runs the inference service with a fast model, so tests don't wait on it, and
+// waits until its consumer exists. If the process exits instead, the test fails with its output.
+func (e env) startInference(t *testing.T, args ...string) *process {
 	t.Helper()
-	p := start(t, "inference", inferenceBin,
+	p := startArgs(t, "inference", inferenceBin, args,
 		"DATABASE_URL="+e.dbURL, "NATS_URL="+e.natsURL, "MODEL_LATENCY=10ms")
-	eventually(t, "inference to apply migrations", func() bool {
-		return e.count(t, "SELECT count(*) FROM pg_tables WHERE tablename = 'insights'") == 1
+	eventually(t, "the inference consumer", func() bool {
+		if p.exited.Load() {
+			t.Fatalf("inference exited during startup:\n%s", p.out.String())
+		}
+		_, err := e.js.Consumer(context.Background(), "LEADS", "inference")
+		return err == nil
 	})
 	return p
 }
@@ -306,11 +329,12 @@ func TestSMSWebhookProducesInteractionAndInsight(t *testing.T) {
 	attribution.stop(t)
 }
 
-// Bulkhead: with inference down, webhooks are still accepted and attributed; inference works
-// through its backlog once it starts.
+// Bulkhead: with the inference process down, webhooks are still accepted and attributed; its
+// consumer keeps its place, so inference works through the backlog once it's back.
 func TestInferenceDownDoesNotAffectIngestOrAttribution(t *testing.T) {
 	e := setup(t)
 	attribution := e.startAttribution(t)
+	e.startInference(t).stop(t) // the consumer exists; the process is down
 	ingest := e.startIngest(t)
 
 	const n = 10
@@ -326,7 +350,7 @@ func TestInferenceDownDoesNotAffectIngestOrAttribution(t *testing.T) {
 		t.Fatalf("insights = %d before inference started, want 0", got)
 	}
 
-	inference := e.startInference(t)
+	inference := e.startInference(t) // restarted
 	eventually(t, "inference to work through its backlog", func() bool {
 		return e.count(t, "SELECT count(*) FROM insights") == n
 	})
@@ -334,4 +358,49 @@ func TestInferenceDownDoesNotAffectIngestOrAttribution(t *testing.T) {
 	ingest.stop(t)
 	inference.stop(t)
 	attribution.stop(t)
+}
+
+// Inference can run without attribution: it applies the migrations it needs itself.
+func TestInferenceStartsAloneOnAFreshDatabase(t *testing.T) {
+	e := setup(t)
+	inference := e.startInference(t)
+
+	if n := e.count(t, "SELECT count(*) FROM pg_tables WHERE tablename = 'insights'"); n != 1 {
+		t.Errorf("insights table missing: inference didn't apply migrations")
+	}
+	inference.stop(t)
+}
+
+// An inference consumer created before it started at new messages reads all history.
+// Starting must fail with instructions; -reset-consumer then recreates it at new messages.
+func TestInferenceResetConsumer(t *testing.T) {
+	e := setup(t)
+	e.startAttribution(t)
+	eventually(t, "the LEADS stream", func() bool { // attribution creates it after migrating
+		_, err := e.js.Stream(context.Background(), "LEADS")
+		return err == nil
+	})
+	if _, err := e.js.CreateOrUpdateConsumer(context.Background(), "LEADS", jetstream.ConsumerConfig{
+		Durable: "inference", AckPolicy: jetstream.AckExplicitPolicy, DeliverPolicy: jetstream.DeliverAllPolicy,
+	}); err != nil {
+		t.Fatalf("create old consumer: %v", err)
+	}
+
+	old := startArgs(t, "inference", inferenceBin, nil, "DATABASE_URL="+e.dbURL, "NATS_URL="+e.natsURL)
+	select {
+	case err := <-old.done:
+		if err == nil || !strings.Contains(old.out.String(), "-reset-consumer") {
+			t.Errorf("exit = %v, output:\n%s\nwant a failure explaining -reset-consumer", err, old.out.String())
+		}
+	case <-time.After(15 * time.Second):
+		t.Fatal("inference kept running with an old consumer")
+	}
+
+	// startInference returns once *a* consumer exists, which may still be the old one.
+	inference := e.startInference(t, "-reset-consumer")
+	eventually(t, "the consumer to be recreated at new messages", func() bool {
+		c, err := e.js.Consumer(context.Background(), "LEADS", "inference")
+		return err == nil && c.CachedInfo().Config.DeliverPolicy == jetstream.DeliverNewPolicy
+	})
+	inference.stop(t)
 }

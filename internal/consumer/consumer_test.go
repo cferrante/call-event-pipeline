@@ -597,3 +597,68 @@ func TestDeadLettersFromBothConsumersAreKept(t *testing.T) {
 		t.Errorf("dead letters by consumer = %v (%d messages), want one each from attribution and inference", got, len(dlq))
 	}
 }
+
+// A new inference consumer starts at new messages, so its first start doesn't spend model
+// capacity on the stream's 7-day history.
+func TestInferenceStartsAtNewMessages(t *testing.T) {
+	srv := newServer(t)
+	for i := range 5 {
+		srv.publish(t, fmt.Sprintf("CAold%d", i))
+	}
+	rec := &fakeRecorder{result: true}
+	h := srv.run(t, Inference(4), rec)
+
+	for i := range 3 {
+		h.publish(t, fmt.Sprintf("CAnew%d", i))
+	}
+	h.waitSettled(t)
+
+	rec.mu.Lock()
+	defer rec.mu.Unlock()
+	for _, id := range rec.calls {
+		if strings.HasPrefix(id, "CAold") {
+			t.Errorf("processed %s, published before the consumer existed", id)
+		}
+	}
+	if len(rec.calls) != 3 {
+		t.Errorf("processed %v, want the 3 new messages", rec.calls)
+	}
+}
+
+// Attribution must record every lead, so it starts at the beginning of the stream.
+func TestAttributionStartsAtAllMessages(t *testing.T) {
+	srv := newServer(t)
+	for i := range 5 {
+		srv.publish(t, fmt.Sprintf("CAold%d", i))
+	}
+	rec := &fakeRecorder{result: true}
+	srv.run(t, Attribution, rec).waitSettled(t)
+
+	if n := rec.callCount(); n != 5 {
+		t.Errorf("processed %d messages, want all 5", n)
+	}
+}
+
+// JetStream can't change where an existing consumer starts. An inference consumer created
+// before this change reads all history, so starting must fail with instructions, not a bare
+// API error; after a reset it works.
+func TestChangedStartPositionNeedsReset(t *testing.T) {
+	srv := newServer(t)
+	if _, err := srv.js.CreateOrUpdateConsumer(srv.ctx, stream.StreamName, jetstream.ConsumerConfig{
+		Durable: "inference", AckPolicy: jetstream.AckExplicitPolicy, DeliverPolicy: jetstream.DeliverAllPolicy,
+	}); err != nil {
+		t.Fatalf("create old consumer: %v", err)
+	}
+
+	_, err := EnsureConsumer(srv.ctx, srv.js, Inference(4))
+	if err == nil || !strings.Contains(err.Error(), "-reset-consumer") {
+		t.Fatalf("err = %v, want one explaining -reset-consumer", err)
+	}
+
+	if err := ResetConsumer(srv.ctx, srv.js, "inference"); err != nil {
+		t.Fatalf("ResetConsumer: %v", err)
+	}
+	if _, err := EnsureConsumer(srv.ctx, srv.js, Inference(4)); err != nil {
+		t.Errorf("EnsureConsumer after reset: %v", err)
+	}
+}

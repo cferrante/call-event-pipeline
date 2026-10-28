@@ -4,6 +4,7 @@ package consumer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
@@ -53,6 +54,9 @@ type Config struct {
 	MaxAckPending int
 	// Workers is how many messages one process handles at once.
 	Workers int
+	// StartAtNew makes a newly created consumer start with messages published from then on,
+	// instead of the whole stream. JetStream fixes this when the consumer is created.
+	StartAtNew bool
 }
 
 // Attribution is the attribution consumer: one message at a time.
@@ -62,7 +66,8 @@ var Attribution = Config{Name: "attribution", Workers: 1}
 // the model's capacity. MaxAckPending is set to the same number, so JetStream never hands out
 // more unfinished messages than the workers (and the model) can take.
 func Inference(workers int) Config {
-	return Config{Name: "inference", Workers: workers, MaxAckPending: workers}
+	// StartAtNew: a first start mustn't spend model capacity on the stream's 7-day history.
+	return Config{Name: "inference", Workers: workers, MaxAckPending: workers, StartAtNew: true}
 }
 
 // Recorder stores an event, reporting false if it was already stored.
@@ -83,8 +88,13 @@ func EnsureConsumer(ctx context.Context, js jetstream.JetStream, cfg Config) (je
 	}); err != nil {
 		return nil, fmt.Errorf("ensure stream %s: %w", DLQStream, err)
 	}
+	deliver := jetstream.DeliverAllPolicy
+	if cfg.StartAtNew {
+		deliver = jetstream.DeliverNewPolicy
+	}
 	cons, err := js.CreateOrUpdateConsumer(ctx, stream.StreamName, jetstream.ConsumerConfig{
 		Durable:       cfg.Name,
+		DeliverPolicy: deliver,
 		AckPolicy:     jetstream.AckExplicitPolicy,
 		AckWait:       ackWait,
 		MaxAckPending: cfg.MaxAckPending,
@@ -93,9 +103,26 @@ func EnsureConsumer(ctx context.Context, js jetstream.JetStream, cfg Config) (je
 		MaxDeliver: maxDeliver + 1,
 	})
 	if err != nil {
+		// JetStream can't change where an existing consumer starts; say how to fix it.
+		if existing, infoErr := js.Consumer(ctx, stream.StreamName, cfg.Name); infoErr == nil &&
+			existing.CachedInfo().Config.DeliverPolicy != deliver {
+			return nil, fmt.Errorf("consumer %s already exists with a different start position, which "+
+				"JetStream can't change; restart once with -reset-consumer to delete and recreate it "+
+				"(it then starts at new messages): %w", cfg.Name, err)
+		}
 		return nil, fmt.Errorf("ensure consumer %s: %w", cfg.Name, err)
 	}
 	return cons, nil
+}
+
+// ResetConsumer deletes the named consumer, if it exists, so EnsureConsumer recreates it with
+// the current settings. Its progress is lost: a reset inference consumer starts at new messages.
+func ResetConsumer(ctx context.Context, js jetstream.JetStream, name string) error {
+	err := js.DeleteConsumer(ctx, stream.StreamName, name)
+	if err != nil && !errors.Is(err, jetstream.ErrConsumerNotFound) {
+		return fmt.Errorf("reset consumer %s: %w", name, err)
+	}
+	return nil
 }
 
 // Handler decides what happens to each message.

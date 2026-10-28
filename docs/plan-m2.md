@@ -182,7 +182,24 @@ dual write and transactional outbox were added with this plan.)
 
 ## Code-review outcomes
 
-_None yet._
+Step 8 ran `/code-review` (medium) on the M2 branch: 9 findings, 6 fixed and 2 declined, plus
+one decision (finding 1) made by you. Fixes were made test-first with deliberate breaks.
+
+1. **Fixed (decision: option A): a new inference consumer read the whole 7-day history**, spending
+   model capacity on stale leads at first start. It now starts at new messages; attribution still
+   reads everything. JetStream can't change an existing consumer's start position, so starting
+   against an old consumer fails with instructions, and `-reset-consumer` recreates it. Tests: old
+   messages skipped (5 of 5 processed before the fix), attribution unaffected, the guidance error
+   (before: a bare "deliver policy can not be updated"), and the reset flag end to end.
+4. **Fixed: the e2e tests' inference start-up wait passed immediately**, because attribution had
+   already created the tables. It now waits for the `inference` consumer and fails at once, with
+   the process output, if inference exits. A new test starts inference alone on a fresh database
+   (the step 5 gap); skipping its migrations is now caught. Made in the same commit as finding 1,
+   because the restructured bulkhead test needed it.
+6. **Fixed: `INFERENCE_WORKERS` defaulted to 4 regardless of `MODEL_CAPACITY`.** It now follows the
+   capacity unless set.
+9. **Fixed: workers and `MaxAckPending` were set separately for inference.** `consumer.Inference(n)`
+   sets both, next to `consumer.Attribution`.
 
 ## Results
 

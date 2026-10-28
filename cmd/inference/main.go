@@ -4,6 +4,7 @@ package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
@@ -22,13 +23,16 @@ import (
 )
 
 func main() {
-	if err := run(); err != nil {
+	reset := flag.Bool("reset-consumer", false,
+		"delete the inference consumer and recreate it; it then starts at new messages")
+	flag.Parse()
+	if err := run(*reset); err != nil {
 		slog.Error("inference stopped", "err", err)
 		os.Exit(1)
 	}
 }
 
-func run() error {
+func run(resetConsumer bool) error {
 	cfg, err := loadConfig()
 	if err != nil {
 		return err
@@ -70,6 +74,12 @@ func run() error {
 		return err
 	}
 	consumerCfg := consumer.Inference(cfg.workers)
+	if resetConsumer {
+		slog.Warn("resetting consumer: its progress is discarded", "consumer", consumerCfg.Name)
+		if err := consumer.ResetConsumer(ctx, js, consumerCfg.Name); err != nil {
+			return err
+		}
+	}
 	cons, err := consumer.EnsureConsumer(ctx, js, consumerCfg)
 	if err != nil {
 		return err

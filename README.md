@@ -55,6 +55,10 @@ go run ./cmd/ingest                       # 4. webhook endpoint on $INGEST_PORT
 
 Stop any of them with Ctrl-C; each finishes in-flight work first.
 
+If inference refuses to start because its consumer "already exists with a different start
+position" (one created before it started at new messages), run it once as
+`go run ./cmd/inference -reset-consumer`.
+
 **Try it**
 
 ```bash

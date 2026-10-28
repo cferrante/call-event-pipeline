@@ -62,7 +62,9 @@ attribution, at its own pace.
 **1. The same stored event.** Nothing new is published: the event already in the `LEADS`
 stream is read a second time, by a different [consumer](#consumer), `inference`, with its own
 progress. A slow model therefore never holds back attribution, and vice versa: a
-[bulkhead](#bulkhead).
+[bulkhead](#bulkhead). Unlike attribution, it starts at messages published after it was
+created (its [deliver policy](#deliver-policy)), so its first start doesn't classify a week of
+old leads.
 
 **2. A fixed number of workers.** The inference service runs a [worker pool](#worker-pool) of
 4, matching the model's [capacity](#capacity): the number of calls it can serve at full speed.
@@ -222,6 +224,16 @@ Where messages go when the system has given up processing them, together with th
 person can fix the cause and replay or discard them. Often shortened to **DLQ**.
 *In this project:* stream `LEADS_DLQ`, subject `leads.dlq`, kept 30 days. Each dead letter has
 the original bytes plus `Dlq-Reason` and `Dlq-Subject` headers. A healthy DLQ is empty.
+
+### Deliver policy
+
+Where a new [consumer](#consumer) starts reading a [stream](#stream): from the first stored
+message ("all"), from messages published after it's created ("new"), or from a given time or
+position. It's fixed when the consumer is created; to change it, the consumer must be deleted
+and recreated, losing its progress.
+*In this project:* attribution uses "all", since every lead must be recorded; inference uses
+"new", so a first start doesn't spend model capacity on old leads. `go run ./cmd/inference
+-reset-consumer` recreates the inference consumer.
 
 ### Delivery count
 

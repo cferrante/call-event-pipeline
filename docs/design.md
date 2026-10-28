@@ -140,6 +140,11 @@ a webhook spike, letting work wait in the stream instead.
 - **A worker pool of N = 4 workers**, matching the model's capacity, and the consumer's
   **`MaxAckPending` = 4**, which JetStream enforces on the server however many inference
   processes run. During a spike, messages wait in the stream (lag), not inside the model.
+- **Starts at new messages.** A newly created `inference` consumer reads only messages published
+  from then on, so a first deployment doesn't spend model capacity on the stream's 7-day history
+  (backfilling old leads would be a deliberate, separate step). Attribution still reads everything.
+  JetStream can't change where an existing consumer starts, so `go run ./cmd/inference
+  -reset-consumer` deletes and recreates it (discarding its progress).
 - **Idempotent like attribution:** results go to `insights` with a unique `provider_id`. Before
   calling the model, a worker skips messages whose insight already exists, so redeliveries
   don't spend model capacity; the unique constraint catches the rare race.
