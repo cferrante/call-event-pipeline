@@ -128,7 +128,7 @@ check() { # check <description> <condition...>
   echo "Spike test $(basename "$RESULTS"): ramp to ${RATE} req/s over ${RAMP}, hold ${HOLD}"
   echo
   echo "  requests sent           ${REQUESTS} (${DUPLICATES_SENT} deliberate duplicates)"
-  echo "  unique webhooks accepted ${UNIQUE_ACCEPTED}"
+  echo "  unique webhooks sent     ${UNIQUE_SENT}, accepted ${UNIQUE_ACCEPTED}"
   echo "  interactions in Postgres ${rows} (${unknown} to the unknown number, ${leads} leads)"
   echo "  edge latency ms          p50 ${P50_MS}  p95 ${P95_MS}  p99 ${P99_MS}  max ${MAX_MS}"
   echo "  failed requests          $(python3 -c "print(f'{${FAILED_RATE} * 100:.3f}%')")"
@@ -137,7 +137,9 @@ check() { # check <description> <condition...>
   echo
   check "k6 thresholds met (0% failed, p99 < 50 ms)" test "$k6_status" -eq 0
   check "zero loss: every accepted webhook is in Postgres" test "$rows" -ge "$UNIQUE_ACCEPTED"
-  check "zero duplicates: no extra rows" test "$rows" -le "$UNIQUE_ACCEPTED"
+  # A webhook can be stored yet answered 503 (its timeout fired as the PubAck arrived), so rows
+  # may exceed "accepted"; a real duplicate is a row beyond anything that was ever sent.
+  check "zero duplicates: no more rows than webhooks sent" test "$rows" -le "$UNIQUE_SENT"
   check "nothing dead-lettered" test "$dlq" -eq 0
   check "backlog fully drained" test "$(nats_stat consumer_pending)" -eq 0
 } >"$RESULTS/report.txt" # not "| tee": a pipeline would run check in a subshell and lose $failures
@@ -147,7 +149,7 @@ commit=$(git rev-parse --short HEAD)
 [ -n "$(git status --porcelain)" ] && commit="${commit}+dirty"
 machine="$(nproc) CPU, $(grep -qi microsoft /proc/version && echo 'Ubuntu WSL2' || uname -s)"
 failed_pct=$(python3 -c "print(f'{${FAILED_RATE} * 100:.3f}%')")
-match="$([ "$rows" -eq "$UNIQUE_ACCEPTED" ] && echo ✓ || echo ✗) ${rows}"
+match="$([ "$rows" -ge "$UNIQUE_ACCEPTED" ] && [ "$rows" -le "$UNIQUE_SENT" ] && echo ✓ || echo ✗) ${rows}"
 echo
 echo "Row for docs/benchmarks.md:"
 echo "| $(date +%F) | \`${commit}\` | ${machine} | ${RATE}/s, ramp ${RAMP}, hold ${HOLD} |" \

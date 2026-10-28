@@ -283,6 +283,12 @@ declined. Each fix was made test-first, with a deliberate break where a test cou
    new migration, `0003`, because `0002` had already been applied to the dev database and
    applied migrations are never edited. The conversation index was replaced to match.
 
+8. **Fixed: the spike test's duplicate check could false-FAIL.** A webhook can be stored yet
+   answered 503, if its 5s timeout fires as the PubAck arrives; that's a legitimate row but not
+   "accepted". k6 now also counts unique webhooks *sent*: loss is rows < accepted, a duplicate is
+   rows > sent. Verified with four short runs: normal (PASS), 5 stored-but-503 webhooks
+   simulated (now PASS; the old check failed), an extra row (FAIL), real loss (FAIL).
+
 Found while fixing these: **Go's test cache doesn't track the binaries the e2e tests build**, so
 `go test -tags integration ./...` reported a stale `ok` after `cmd/attribution` changed. The README
 now runs integration tests with `-count=1`.

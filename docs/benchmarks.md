@@ -9,15 +9,16 @@ Numbers are only comparable between rows with the same machine.
 
 ## Results
 
-| Date | Commit | Machine | Load | Edge p50 / p99 | Errors | Peak lag | Drained after | Accepted = rows | Dead letters |
+| Date | Commit | Machine | Load | Edge p50 / p99 | Errors | Peak lag | Drained after | Rows | Dead letters |
 |---|---|---|---|---|---|---|---|---|---|
 | 2026-10-28 | `2f7278d` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s | 0.42 / 1.03 ms | 0.000% | 22675 | 27s | ✓ 67499 | 0 |
 | 2026-10-28 | `607534e` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s | 0.47 / 2.02 ms | 0.000% | 27123 | 37s | ✓ 67499 | 0 |
 
 Columns: **Load** is peak rate, ramp and hold. **Edge** latency is k6's view of the ingest
 service. **Peak lag** is the attribution consumer's largest backlog, and **Drained after** is how
-long after the spike ended it reached 0. **Accepted = rows** compares unique webhooks that got a
-200 with interactions in Postgres (the zero-loss and zero-duplicate check).
+long after the spike ended it reached 0. **Rows** is interactions in Postgres, ✓ when it's at
+least the unique webhooks that got a 200 (zero loss) and at most the unique webhooks sent (zero
+duplicates).
 
 ## Notes
 

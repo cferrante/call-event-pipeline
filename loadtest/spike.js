@@ -40,6 +40,7 @@ export const options = {
 };
 
 const uniqueAccepted = new Counter('unique_accepted'); // distinct CallSids that got a 200
+const uniqueSent = new Counter('unique_sent'); // distinct CallSids sent, whatever the response
 const duplicatesSent = new Counter('duplicates_sent');
 
 const TRACKING_NUMBERS = ['+18005550001', '+18005550002', '+18005550003', '+18005559999']; // last is unknown
@@ -65,6 +66,7 @@ export default function () {
     tags: { name: 'voice webhook' },
   };
 
+  uniqueSent.add(1);
   let accepted = http.post(TARGET + WEBHOOK_PATH, body, req).status === 200;
   if (Math.random() < DUP_RATE) {
     duplicatesSent.add(1);
@@ -83,6 +85,7 @@ export function handleSummary(data) {
     REQUESTS: m.http_reqs.values.count,
     FAILED_RATE: m.http_req_failed.values.rate,
     UNIQUE_ACCEPTED: m.unique_accepted ? m.unique_accepted.values.count : 0,
+    UNIQUE_SENT: m.unique_sent ? m.unique_sent.values.count : 0,
     DUPLICATES_SENT: m.duplicates_sent ? m.duplicates_sent.values.count : 0,
     PEAK_RPS: RATE,
     P50_MS: d['p(50)'].toFixed(2),
