@@ -205,10 +205,22 @@ one decision (finding 1) made by you. Fixes were made test-first with deliberate
    rounding was as large as the 10% "flat" tolerance. It's now fractional (migration `0005`), and
    the spike test compares with decimals. Short runs: 4 workers, p95 11.71 ms idle vs 11.67 ms
    spike (PASS); 200 workers, 11.80 vs 190.25 ms (FAIL, as it should).
+5. **Fixed: the spike test's idle and spike windows started at the earliest *insight*.** In control
+   mode early messages may be dead-lettered, which shifted both windows. They now start at the
+   earliest interaction. Simulated by deleting the first 2 s of insights: before, the idle window
+   took 260 messages (mostly ramp-up) and the spike window 911; after, 30 and exactly 1,000.
 6. **Fixed: `INFERENCE_WORKERS` defaulted to 4 regardless of `MODEL_CAPACITY`.** It now follows the
    capacity unless set.
 9. **Fixed: workers and `MaxAckPending` were set separately for inference.** `consumer.Inference(n)`
    sets both, next to `consumer.Attribution`.
+
+**Declined:**
+
+7. **"During an upgrade, a dead letter could be stored twice"**, because its de-duplication ID now
+   includes the consumer name. True only if an old and a new process handle the same failing
+   message within the 2-minute de-duplication window, and there's no deployed system to upgrade.
+8. **"Move the number and duration parsing helpers into `internal/env`."** There's one copy; as
+   in M1, a shared helper waits for the third.
 
 ## Results
 

@@ -165,13 +165,15 @@ max_inference_lag=$(tail -n +2 "$RESULTS/lag.csv" | cut -d, -f3 | sort -n | tail
 timeouts=$(grep -c 'model overloaded' "$RESULTS/inference.log" || true)
 
 # Model latency and time to insight (ms) for the idle window (the first IDLE seconds) and the
-# spike window (the hold), by when each webhook was received.
+# spike window (the hold), by when each webhook was received. The windows start at the earliest
+# interaction, not insight: in control mode early messages may have no insight (dead-lettered),
+# which would shift both windows. Attribution records every webhook.
 idle_end=$(secs "$IDLE") spike_start=$(( $(secs "$IDLE") + $(secs "$RAMP") ))
 spike_end=$(( spike_start + $(secs "$HOLD") ))
 window() { # window idle|spike -> "count model_p50 model_p95 tti_p50 tti_p95" (0s if empty)
   local from to
   if [ "$1" = idle ]; then from=0 to=$idle_end; else from=$spike_start to=$spike_end; fi
-  sql "WITH t AS (SELECT min(received_at) AS t0 FROM insights),
+  sql "WITH t AS (SELECT min(occurred_at) AS t0 FROM interactions),
             w AS (SELECT model_ms, extract(epoch FROM created_at - received_at) * 1000 AS tti
                   FROM insights, t
                   WHERE received_at >= t0 + make_interval(secs => $from)
