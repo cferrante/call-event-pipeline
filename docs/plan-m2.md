@@ -191,6 +191,11 @@ one decision (finding 1) made by you. Fixes were made test-first with deliberate
    against an old consumer fails with instructions, and `-reset-consumer` recreates it. Tests: old
    messages skipped (5 of 5 processed before the fix), attribution unaffected, the guidance error
    (before: a bare "deliver policy can not be updated"), and the reset flag end to end.
+3. **Fixed: the spike test's drain wait trusted a NATS stats call whose failure was ignored**, and
+   no longer checked row counts. Stats reads are now retried and, if they keep failing, report "?",
+   which no check accepts; the drain waits for the row counts again; and an undrained consumer is
+   reported as "did not drain" rather than with a misleading time. Break: the stats endpoint made
+   unreachable during the drain gives a clean FAIL with no bash errors.
 4. **Fixed: the e2e tests' inference start-up wait passed immediately**, because attribution had
    already created the tables. It now waits for the `inference` consumer and fails at once, with
    the process output, if inference exits. A new test starts inference alone on a fresh database

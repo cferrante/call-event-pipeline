@@ -52,8 +52,17 @@ wait_for() { # wait_for <description> <command...>
 sql() { psql -X -A -t "$DB_URL" -c "$1"; }
 # Prints "attribution_pending attribution_ack_pending inference_pending inference_ack_pending
 # dead_letters" from the NATS monitoring endpoint, in one call (python3: jq isn't installed).
+# Retries a failed read; if it keeps failing, prints "?" for each, which no check accepts as 0.
 nats_stats() {
-  curl -s "http://127.0.0.1:${MON_PORT}/jsz?streams=true&consumers=true" | python3 -c '
+  local out
+  for _ in 1 2 3; do
+    out=$(nats_stats_once 2>/dev/null) && [[ $out =~ ^[0-9]+( [0-9]+){4}$ ]] && { echo "$out"; return; }
+    sleep 0.5
+  done
+  echo "? ? ? ? ?"
+}
+nats_stats_once() {
+  curl -sf "http://127.0.0.1:${MON_PORT}/jsz?streams=true&consumers=true" | python3 -c '
 import json, sys
 streams = {s["name"]: s for a in json.load(sys.stdin).get("account_details", []) for s in a.get("stream_detail", [])}
 consumers = {c["name"]: c for c in streams.get("LEADS", {}).get("consumer_detail", [])}
@@ -125,17 +134,24 @@ source "$RESULTS/summary.env"
 unexpected=$(grep -c 'unexpected response' "$RESULTS/k6.log" || true)
 
 log "k6 finished; waiting for both consumers to drain (up to ${DRAIN_TIMEOUT}s)"
-drain_start=$(date +%s) attribution_drain_s=""
+drain_start=$(date +%s) attribution_drain_s="" inference_drain_s=""
+# Normal mode expects every accepted webhook to get an insight; in control, some are dead-lettered.
+want_insights=$([ "$MODE" = normal ] && echo "$UNIQUE_ACCEPTED" || echo 0)
 while :; do
   read -r ap aap ip iap _ <<<"$(nats_stats)"
+  rows=$(sql "SELECT count(*) FROM interactions") insights=$(sql "SELECT count(*) FROM insights")
   elapsed=$(( $(date +%s) - drain_start ))
-  if [ -z "$attribution_drain_s" ] && [ "$ap" = 0 ] && [ "$aap" = 0 ]; then attribution_drain_s=$elapsed; fi
-  if [ -n "$attribution_drain_s" ] && [ "$ip" = 0 ] && [ "$iap" = 0 ]; then break; fi
+  if [ -z "$attribution_drain_s" ] && [ "$ap" = 0 ] && [ "$aap" = 0 ] && [ "$rows" -ge "$UNIQUE_ACCEPTED" ]; then
+    attribution_drain_s=$elapsed
+  fi
+  if [ -n "$attribution_drain_s" ] && [ "$ip" = 0 ] && [ "$iap" = 0 ] && [ "$insights" -ge "$want_insights" ]; then
+    inference_drain_s=$elapsed
+    break
+  fi
   if (( elapsed > DRAIN_TIMEOUT )); then log "drain timed out"; break; fi
   sleep 1
 done
-inference_drain_s=$(( $(date +%s) - drain_start ))
-attribution_drain_s=${attribution_drain_s:-timeout}
+drained() { [ -n "$1" ] && echo "drained ${1}s after k6 finished" || echo "did not drain within ${DRAIN_TIMEOUT}s"; }
 sleep 2 # let the sampler record the drained state
 kill "$sampler" 2>/dev/null || true
 
@@ -190,9 +206,9 @@ check() { # check <description> <condition...>
   echo "  edge latency ms            p50 ${P50_MS}  p95 ${P95_MS}  p99 ${P99_MS}  max ${MAX_MS}"
   echo "  failed requests            $(python3 -c "print(f'{${FAILED_RATE} * 100:.3f}%')") (${unexpected} logged in k6.log)"
   echo "  interactions               ${rows} (${unknown} to the unknown number, ${leads} leads)"
-  echo "  attribution lag            peak ${max_lag}; drained ${attribution_drain_s}s after k6 finished"
+  echo "  attribution lag            peak ${max_lag}; $(drained "$attribution_drain_s")"
   echo "  insights                   ${insights}"
-  echo "  inference lag              peak ${max_inference_lag}; drained ${inference_drain_s}s after k6 finished"
+  echo "  inference lag              peak ${max_inference_lag}; $(drained "$inference_drain_s")"
   echo "  model latency ms           idle p50 ${idle_m50} p95 ${idle_m95} (${idle_n})  spike p50 ${spike_m50} p95 ${spike_m95} (${spike_n})"
   echo "  time to insight ms         idle p50 ${idle_t50} p95 ${idle_t95}  spike p50 ${spike_t50} p95 ${spike_t95}"
   echo "  model timeouts (retried)   ${timeouts}"
@@ -203,13 +219,13 @@ check() { # check <description> <condition...>
   # A webhook can be stored yet answered 503 (its timeout fired as the PubAck arrived), so rows
   # may exceed "accepted"; a real duplicate is a row beyond anything that was ever sent.
   check "zero duplicates: no more interactions than webhooks sent" test "$rows" -le "$UNIQUE_SENT"
-  check "attribution backlog fully drained" test "$ap" -eq 0
+  check "attribution backlog fully drained" test "$ap" = 0
   if [ "$MODE" = normal ]; then
     check "model latency flat: spike p95 within 10% of idle p95" flat
     check "zero loss: every accepted webhook has an insight" test "$insights" -ge "$UNIQUE_ACCEPTED"
     check "zero duplicates: no more insights than webhooks sent" test "$insights" -le "$UNIQUE_SENT"
-    check "inference backlog fully drained" test "$ip" -eq 0
-    check "nothing dead-lettered" test "$dlq" -eq 0
+    check "inference backlog fully drained" test "$ip" = 0
+    check "nothing dead-lettered" test "$dlq" = 0
   else
     # Control: without the limit the model is expected to overload, losing work to timeouts
     # and dead letters. If it doesn't, the experiment can't tell the protection apart.
@@ -226,9 +242,9 @@ match="$([ "$rows" -ge "$UNIQUE_ACCEPTED" ] && [ "$rows" -le "$UNIQUE_SENT" ] &&
 echo
 echo "Rows for docs/benchmarks.md:"
 echo "| $(date +%F) | \`${commit}\` | ${machine} | ${RATE}/s, ramp ${RAMP}, hold ${HOLD} |" \
-  "${P50_MS} / ${P99_MS} ms | ${failed_pct} | ${max_lag} | ${attribution_drain_s}s | ${match} | ${dlq} |"
+  "${P50_MS} / ${P99_MS} ms | ${failed_pct} | ${max_lag} | ${attribution_drain_s:-timeout}s | ${match} | ${dlq} |"
 echo "| $(date +%F) | \`${commit}\` | ${MODE}, ${INFERENCE_WORKERS} workers | ${idle_m95} / ${spike_m95} ms |" \
-  "${idle_t95} / ${spike_t95} ms | ${max_inference_lag} | ${inference_drain_s}s | ${insights} | ${timeouts} | ${dlq} |"
+  "${idle_t95} / ${spike_t95} ms | ${max_inference_lag} | ${inference_drain_s:-timeout}s | ${insights} | ${timeouts} | ${dlq} |"
 echo
 
 [ "$failures" -eq 0 ] && log "PASS ($RESULTS)" || { log "FAIL: ${failures} check(s) ($RESULTS)"; exit 1; }
