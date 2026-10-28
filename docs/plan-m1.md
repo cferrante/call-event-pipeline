@@ -225,6 +225,11 @@ and you can start and stop NATS and Postgres yourself.
 - **Step 10a: optional `INGEST_FORWARD_TO`** chooses the voice TwiML (`<Dial>` or end the call),
   and the HTTP server has read/write timeouts so stalled clients can't tie up connections
   during a spike.
+- **Step 10b: the attribution service applies migrations at startup**, so a fresh database
+  needs no separate migrate step (`cmd/migrate` still exists for doing it by hand).
+- **Step 10b: end-to-end tests (`e2e/`) build and run the real binaries** against a throwaway
+  NATS server and database, which also covers the `main` wiring: config, startup migrations
+  and clean exit on Ctrl-C.
 
 ## Code-review outcomes
 
