@@ -247,4 +247,21 @@ _None yet._
 
 ## Results
 
-_Spike test results are recorded here in step 11._
+### Spike test
+
+Baseline at `2f7278d`, `./loadtest/run.sh` with the defaults (ramp to 1,000 req/s over 10s, hold
+60s, 5% deliberate duplicates). **PASS.** Details, the lag curve and later runs are in
+[benchmarks](benchmarks.md).
+
+| Target ([spec section 8](design.md#8-measuring-absorbing-spikes)) | Result | |
+|---|---|---|
+| Edge p99 latency < 50 ms at 1,000 req/s | p50 0.42 ms, **p99 1.03 ms**, max 8.9 ms | ✓ |
+| Edge error rate 0% | 0 of 70,945 requests failed | ✓ |
+| Consumer lag rises during the spike, returns to 0 | peaked at **22,675** messages, drained 27s after the spike | ✓ |
+| Loss: accepted = rows | 67,499 unique webhooks accepted, 67,499 interactions | ✓ |
+| Duplicates: replays add no rows | 3,446 duplicates sent, 0 extra rows | ✓ |
+| Dead letters | 0 | ✓ |
+
+The spike became lag, not errors or lost leads. The consumer handles roughly 625–750 messages/s
+one at a time; if draining ever needs to be faster, processing messages in parallel is the next
+lever, measured with the same script before and after.

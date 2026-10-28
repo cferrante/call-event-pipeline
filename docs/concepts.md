@@ -8,7 +8,7 @@ then use the [glossary](#glossary) to look things up. The [design spec](design.m
 
 **1. A call comes in.** Someone calls one of our [tracking numbers](#tracking-number). Twilio
 answers and sends a [webhook](#webhook): an HTTP POST describing the call (`CallSid`, `From`,
-`To`, …) to our **ingest edge**.
+`To`, …) to our ingest [edge](#edge).
 
 **2. The edge checks and stores it.** The edge verifies the
 [`X-Twilio-Signature`](#x-twilio-signature) header so forged requests are rejected, wraps the
@@ -24,7 +24,8 @@ webhook, the stream's [duplicate window](#duplicate-window) drops the copy.
 
 **4. The edge is done.** It never waits for anything slower. During a traffic spike, messages
 pile up in the stream instead of slowing the edge down: that pile is
-[consumer lag](#consumer-lag), and it drains once the spike passes.
+[consumer lag](#consumer-lag), and it drains once the spike passes. The
+[consumer lag](#consumer-lag) entry shows a real measured curve.
 
 **5. A worker picks it up.** The [consumer](#consumer) `attribution` is
 [durable](#durable-consumer) (JetStream remembers its progress) and [pull-based](#pull-consumer)
@@ -117,7 +118,25 @@ progress, so slow AI work never holds back attribution.
 How far a [consumer](#consumer) is behind the newest message: the number of messages stored
 but not yet processed. JetStream reports it as `num_pending`.
 *In this project:* the shock absorber. A spike makes lag rise, then drain; it's monitored at
-`localhost:8222/jsz`.
+`localhost:8222/jsz`. This is the baseline spike test, 1,000 webhooks/s for about 70 seconds
+(numbers are messages waiting):
+
+```
+   0s      0
+  10s    401
+  20s   3780 ######
+  30s   7210 ############
+  50s  14865 ########################
+  60s  18854 ###############################
+  70s  22531 #####################################   spike ends (peak 22,675 at 71s)
+  80s  16799 ###########################
+  90s   9018 ###############
+ 100s    233
+ 101s      0                                         drained
+```
+
+The edge accepted every webhook in about a millisecond the whole time. More details are in
+[benchmarks](benchmarks.md).
 
 ### Coordinated omission
 
@@ -173,6 +192,15 @@ The international phone number format: `+`, country code, number, no spaces, up 
 For example `+14158675310`.
 *In this project:* tracking numbers and identifiable callers are E.164. Withheld caller IDs
 (e.g. `anonymous`) aren't.
+
+### Edge
+
+The part of a system at its outer boundary, receiving requests from the outside world.
+*In this project:* the ingest service (`cmd/ingest`). It only verifies, stores and acknowledges
+each webhook, never waiting for attribution or AI, so its latency stays flat during a spike.
+"Edge latency" in the spike test is the time from k6 sending a webhook to receiving the 200,
+which includes waiting for JetStream's [PubAck](#puback). Measured values are in
+[benchmarks](benchmarks.md); see [percentile](#percentile) for p50 and p99.
 
 ### Envelope
 
