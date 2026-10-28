@@ -58,6 +58,13 @@ type Config struct {
 // Attribution is the attribution consumer: one message at a time.
 var Attribution = Config{Name: "attribution", Workers: 1}
 
+// Inference is the inference consumer with the given number of workers, which should match
+// the model's capacity. MaxAckPending is set to the same number, so JetStream never hands out
+// more unfinished messages than the workers (and the model) can take.
+func Inference(workers int) Config {
+	return Config{Name: "inference", Workers: workers, MaxAckPending: workers}
+}
+
 // Recorder stores an event, reporting false if it was already stored.
 type Recorder interface {
 	Record(ctx context.Context, env envelope.Envelope) (bool, error)

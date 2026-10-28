@@ -69,9 +69,7 @@ func run() error {
 	if err := stream.EnsureStream(ctx, js); err != nil {
 		return err
 	}
-	// MaxAckPending = workers: JetStream never hands out more unfinished messages than the
-	// model can serve, however many inference processes run.
-	consumerCfg := consumer.Config{Name: "inference", Workers: cfg.workers, MaxAckPending: cfg.workers}
+	consumerCfg := consumer.Inference(cfg.workers)
 	cons, err := consumer.EnsureConsumer(ctx, js, consumerCfg)
 	if err != nil {
 		return err
