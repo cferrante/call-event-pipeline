@@ -200,6 +200,15 @@ and you can start and stop NATS and Postgres yourself.
 - **Step 7: the tracking-number lookup is part of the interaction insert** (one SQL statement
   with a `LEFT JOIN`), not a separate query. The insert needs the campaign anyway, and one
   statement keeps the gate and the lookup in a single round trip.
+- **Step 8: no JetStream `BackOff`; retry delays come from `NakWithDelay`.** With `BackOff`
+  set, JetStream uses its first value (1s) instead of `AckWait`, so a write slower than 1s is
+  redelivered while still running. A test showed this against the real server (2 deliveries
+  of a 1.5s write); the spec's [JetStream table](design.md#52-jetstream-configuration) is
+  corrected.
+- **Step 8: the consumer logic lives in `internal/consumer`**, so it can be tested against a
+  real NATS server; `cmd/attribution` only wires it up (step 10).
+- **Step 8: each attempt is limited to 20s,** below the 30s `AckWait`, so a stuck attempt fails
+  and is retried by us instead of being redelivered while it's still running.
 
 ## Code-review outcomes
 

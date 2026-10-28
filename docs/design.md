@@ -87,7 +87,9 @@ can slow the edge, because the stream sits between them.
 | Storage | File | Survives restarts |
 | Retention | Limits (max age 7d) | Lets new consumers (e.g. M2) replay history |
 | Duplicate window | 10 min | Covers provider retry bursts; DB constraint covers beyond |
-| Consumer `attribution` | Durable pull, `AckExplicit`, `AckWait 30s`, `MaxDeliver 5`, backoff 1s/5s/30s | Pull lets workers fetch only what they can handle |
+| Consumer `attribution` | Durable pull, `AckExplicit`, `AckWait 30s`, `MaxDeliver 5`, no `BackOff` | Pull lets workers fetch only what they can handle |
+| Retry delays | `NakWithDelay` 1s, 5s, then 30s per attempt | JetStream's `BackOff` replaces `AckWait` with its first value, so a write slower than 1s would be redelivered while still running ([section 5.5](#55-delivery-guarantees)) |
+| Stream `LEADS_DLQ` | Subject `leads.dlq`, file storage, max age 30d | Messages that can never succeed, kept for a human to inspect |
 
 ### 5.3 Attribution consumer (`cmd/attribution`)
 
