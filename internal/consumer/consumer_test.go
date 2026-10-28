@@ -60,9 +60,8 @@ type harness struct {
 	stopRun func() error
 }
 
-// start runs a NATS server with the LEADS stream, the DLQ and the attribution consumer, and
-// processes messages with rec until the test ends. Retry delays are shortened for tests.
-func start(t *testing.T, rec Recorder) harness {
+// newServer starts a NATS server with the LEADS stream.
+func newServer(t *testing.T) harness {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	t.Cleanup(cancel)
@@ -74,25 +73,38 @@ func start(t *testing.T, rec Recorder) harness {
 	if err := stream.EnsureStream(ctx, js); err != nil {
 		t.Fatalf("EnsureStream: %v", err)
 	}
-	cons, err := EnsureConsumer(ctx, js)
+	return harness{ctx: ctx, js: js}
+}
+
+// run ensures the consumer described by cfg (and the DLQ), and processes messages with rec
+// until the test ends. Retry delays are shortened for tests.
+func (h harness) run(t *testing.T, cfg Config, rec Recorder) harness {
+	t.Helper()
+	cons, err := EnsureConsumer(h.ctx, h.js, cfg)
 	if err != nil {
 		t.Fatalf("EnsureConsumer: %v", err)
 	}
-
-	h := &Handler{js: js, rec: rec, retryDelays: []time.Duration{50 * time.Millisecond}}
-	runCtx, stop := context.WithCancel(ctx)
+	handler := &Handler{consumer: cfg.Name, js: h.js, rec: rec, retryDelays: []time.Duration{50 * time.Millisecond}}
+	runCtx, stop := context.WithCancel(h.ctx)
 	done := make(chan error, 1)
-	go func() { done <- Run(runCtx, cons, h) }()
+	go func() { done <- Run(runCtx, cons, handler, cfg.Workers) }()
 	stopRun := sync.OnceValue(func() error {
 		stop()
 		return <-done
 	})
 	t.Cleanup(func() {
 		if err := stopRun(); err != nil {
-			t.Errorf("Run: %v", err)
+			t.Errorf("Run %s: %v", cfg.Name, err)
 		}
 	})
-	return harness{ctx: ctx, js: js, cons: cons, stopRun: stopRun}
+	h.cons, h.stopRun = cons, stopRun
+	return h
+}
+
+// start runs the attribution consumer with rec on a fresh server.
+func start(t *testing.T, rec Recorder) harness {
+	t.Helper()
+	return newServer(t).run(t, Attribution, rec)
 }
 
 func (h harness) publish(t *testing.T, id string) {
@@ -352,6 +364,11 @@ func TestShutdownFinishesBufferedMessagesWithLiveContext(t *testing.T) {
 	if err := h.stopRun(); err != nil {
 		t.Fatalf("Run: %v", err)
 	}
+	// Acks are sent without waiting for the server. A flush is a round trip, and the server
+	// handles messages in order, so afterwards every ack sent before it has arrived.
+	if err := h.js.Conn().FlushTimeout(5 * time.Second); err != nil {
+		t.Fatalf("flush: %v", err)
+	}
 
 	calls, cancelled := rec.counts()
 	if cancelled != 0 {
@@ -398,7 +415,7 @@ func TestFailedDeadLetterOnFinalAttemptIsRetried(t *testing.T) {
 				t.Errorf("delete DLQ: %v", err)
 			}
 		case maxDeliver + 1:
-			if _, err := EnsureConsumer(h.ctx, h.js); err != nil {
+			if _, err := EnsureConsumer(h.ctx, h.js, Attribution); err != nil {
 				t.Errorf("recreate DLQ: %v", err)
 			}
 		}
@@ -443,8 +460,140 @@ func TestClientHoldsOnlyASmallBatch(t *testing.T) {
 		time.Sleep(5 * time.Millisecond)
 	}
 
-	// The buffer holds up to pullBatch; the message being processed has already left it.
-	if maxHeld > pullBatch+1 {
-		t.Errorf("client held up to %d unacked messages, want at most %d", maxHeld, pullBatch+1)
+	// The buffer holds up to pullBatch; each worker may be processing one more, and the fetch
+	// loop may hold one more while waiting to hand it to a free worker.
+	limit := pullBatch + Attribution.Workers + 1
+	if maxHeld > limit {
+		t.Errorf("client held up to %d unacked messages, want at most %d", maxHeld, limit)
+	}
+}
+
+// concurrencyRecorder succeeds slowly and records the most calls it saw running at once.
+type concurrencyRecorder struct {
+	delay   time.Duration
+	mu      sync.Mutex
+	running int
+	maxSeen int
+	calls   int
+}
+
+func (r *concurrencyRecorder) Record(context.Context, envelope.Envelope) (bool, error) {
+	r.mu.Lock()
+	r.running++
+	r.calls++
+	r.maxSeen = max(r.maxSeen, r.running)
+	r.mu.Unlock()
+	time.Sleep(r.delay)
+	r.mu.Lock()
+	r.running--
+	r.mu.Unlock()
+	return true, nil
+}
+
+func (r *concurrencyRecorder) stats() (calls, maxSeen int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls, r.maxSeen
+}
+
+// processAll publishes n messages to a consumer running with cfg and returns the most
+// messages it processed at once.
+func processAll(t *testing.T, cfg Config, n int) int {
+	t.Helper()
+	rec := &concurrencyRecorder{delay: 30 * time.Millisecond}
+	h := newServer(t).run(t, cfg, rec)
+	for i := range n {
+		h.publish(t, fmt.Sprintf("CA%03d", i))
+	}
+	h.waitSettled(t)
+	calls, maxSeen := rec.stats()
+	if calls != n {
+		t.Fatalf("Record called %d times, want %d", calls, n)
+	}
+	return maxSeen
+}
+
+func TestWorkersProcessConcurrently(t *testing.T) {
+	cfg := Config{Name: "inference", Workers: 4, MaxAckPending: 4}
+
+	if got := processAll(t, cfg, 40); got != 4 {
+		t.Errorf("at most %d messages processed at once, want 4", got)
+	}
+}
+
+// MaxAckPending is enforced by JetStream, so it holds even if a process runs more workers
+// than the model can serve (or several processes run).
+func TestMaxAckPendingCapsWorkers(t *testing.T) {
+	cfg := Config{Name: "inference", Workers: 10, MaxAckPending: 4}
+
+	if got := processAll(t, cfg, 40); got > 4 {
+		t.Errorf("at most %d messages processed at once, want no more than MaxAckPending 4", got)
+	}
+}
+
+// Attribution keeps processing one message at a time.
+func TestAttributionIsSequential(t *testing.T) {
+	if got := processAll(t, Attribution, 20); got != 1 {
+		t.Errorf("at most %d messages processed at once, want 1", got)
+	}
+}
+
+// Bulkhead: two consumers on one stream keep separate progress, so a stalled one doesn't
+// hold the other back.
+func TestConsumersProgressIndependently(t *testing.T) {
+	srv := newServer(t)
+	stalled := make(chan struct{})
+	inference := srv.run(t, Config{Name: "inference", Workers: 1, MaxAckPending: 1}, blockingRecorder(stalled))
+	attr := srv.run(t, Attribution, &fakeRecorder{result: true})
+	// Registered after run, so it runs before run's cleanup (cleanups run last-in, first-out):
+	// releasing the stalled recorder first lets shutdown finish at once.
+	t.Cleanup(func() { close(stalled) })
+
+	for i := range 10 {
+		srv.publish(t, fmt.Sprintf("CA%02d", i))
+	}
+	info := attr.waitSettled(t)
+
+	if info.Delivered.Consumer != 10 {
+		t.Errorf("attribution deliveries = %d, want 10", info.Delivered.Consumer)
+	}
+	inf, err := inference.cons.Info(srv.ctx)
+	if err != nil {
+		t.Fatalf("inference info: %v", err)
+	}
+	if inf.NumPending+uint64(inf.NumAckPending) != 10 {
+		t.Errorf("inference pending = %d + %d in progress, want all 10 still waiting", inf.NumPending, inf.NumAckPending)
+	}
+}
+
+// blockingRecorder never finishes until release is closed.
+type blockingRecorder chan struct{}
+
+func (b blockingRecorder) Record(ctx context.Context, _ envelope.Envelope) (bool, error) {
+	select {
+	case <-b:
+	case <-ctx.Done():
+	}
+	return false, errors.New("stalled")
+}
+
+// Both consumers share the DLQ. Each dead letter records which consumer gave up, and one
+// consumer's dead letter must not be dropped as a duplicate of the other's.
+func TestDeadLettersFromBothConsumersAreKept(t *testing.T) {
+	srv := newServer(t)
+	attr := srv.run(t, Attribution, &fakeRecorder{result: true})
+	inference := srv.run(t, Config{Name: "inference", Workers: 4, MaxAckPending: 4}, &fakeRecorder{result: true})
+
+	srv.publishRaw(t, "not an envelope")
+	attr.waitSettled(t)
+	inference.waitSettled(t)
+
+	dlq := srv.dlqMessages(t)
+	got := map[string]bool{}
+	for _, m := range dlq {
+		got[m.Header.Get(HeaderConsumer)] = true
+	}
+	if len(dlq) != 2 || !got["attribution"] || !got["inference"] {
+		t.Errorf("dead letters by consumer = %v (%d messages), want one each from attribution and inference", got, len(dlq))
 	}
 }

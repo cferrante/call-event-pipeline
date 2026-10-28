@@ -68,14 +68,14 @@ func run() error {
 	if err := stream.EnsureStream(ctx, js); err != nil {
 		return err
 	}
-	cons, err := consumer.EnsureConsumer(ctx, js)
+	cons, err := consumer.EnsureConsumer(ctx, js, consumer.Attribution)
 	if err != nil {
 		return err
 	}
 
 	slog.Info("attribution consuming", "config", cfg)
-	handler := consumer.NewHandler(js, attribution.NewStore(db))
-	if err := consumer.Run(ctx, cons, handler); err != nil {
+	handler := consumer.NewHandler(consumer.Attribution.Name, js, attribution.NewStore(db))
+	if err := consumer.Run(ctx, cons, handler, consumer.Attribution.Workers); err != nil {
 		return err
 	}
 	slog.Info("attribution stopped cleanly")

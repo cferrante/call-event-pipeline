@@ -141,7 +141,19 @@ dual write and transactional outbox were added with this plan.)
 
 ## Deviations from the plan
 
-_None yet._
+- **Step 4: dead-letter IDs now include the consumer's name.** A dead letter's de-duplication
+  ID was built from the message's stream position alone, so once two consumers share the DLQ,
+  the second consumer's dead letter for the same message was silently dropped as a duplicate.
+  Found while planning the step's tests; a test showed only 1 of the expected 2 dead letters.
+- **Step 4: the client may hold one more message than in M1**: up to the pull batch, plus one
+  per worker, plus one waiting in the fetch loop to be handed to a worker. For attribution that's
+  12, where M1's test allowed 11; still processable within `AckWait` (12 × 2s = 24s < 30s).
+  Running M1's test 5 times caught this; a single run under the race detector had passed.
+- **Step 4: the shutdown test now flushes the connection before checking acks.** Acks are sent
+  without waiting for the server, so the check occasionally ran before the last ack arrived
+  (1 failure in 10 runs under the race detector). The flush is a round trip, which guarantees
+  earlier acks have arrived; 30 of 30 runs pass. Production already drains the connection
+  before exiting (M1 code-review finding 5).
 
 ## Code-review outcomes
 
