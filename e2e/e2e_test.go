@@ -2,6 +2,9 @@
 
 // Package e2e runs the real ingest and attribution binaries as separate processes against a
 // throwaway NATS server and database, and drives them over HTTP as Twilio would.
+//
+// Run with -count=1: the binaries are built with "go build", so Go's test cache doesn't know
+// these tests depend on cmd/ingest and cmd/attribution and can report a stale pass.
 package e2e
 
 import (

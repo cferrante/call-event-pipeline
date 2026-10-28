@@ -82,8 +82,11 @@ func NewHandler(js jetstream.JetStream, rec Recorder) *Handler {
 }
 
 // Run processes messages until ctx is cancelled, then finishes in-flight work and returns.
+// Cancelling ctx stops fetching; messages already received are still processed, with a
+// context the shutdown can't cancel (each attempt keeps its own time limit).
 func Run(ctx context.Context, cons jetstream.Consumer, h *Handler) error {
-	cc, err := cons.Consume(func(msg jetstream.Msg) { h.Handle(ctx, msg) })
+	workCtx := context.WithoutCancel(ctx)
+	cc, err := cons.Consume(func(msg jetstream.Msg) { h.Handle(workCtx, msg) })
 	if err != nil {
 		return fmt.Errorf("start consuming: %w", err)
 	}

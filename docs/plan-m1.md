@@ -247,7 +247,21 @@ and you can start and stop NATS and Postgres yourself.
 
 ## Code-review outcomes
 
-_None yet._
+Step 13 ran `/code-review` (medium effort) on the whole M1 branch: 10 findings, 8 fixed and 2
+declined. Each fix was made test-first, with a deliberate break where a test could show it.
+
+1. **Fixed: on shutdown, buffered messages were processed with the cancelled shutdown context**,
+   so each failed and used up a retry; on a 5th attempt even the dead-letter write failed. `Run`
+   now stops fetching on shutdown but processes messages it already holds with a context the
+   shutdown can't cancel. Test: 29 of 30 buffered messages failed before the fix, 0 after.
+5. **Fixed (attribution): `defer nc.Drain()` didn't wait**, so the last acks could be lost at exit,
+   causing avoidable redeliveries. The service now waits until the connection has closed.
+   Ingest is unaffected, since its publishes already wait for their PubAck. Not covered by a test:
+   whether unsent acks are lost at exit depends on timing, so a test couldn't reliably show it.
+
+Found while fixing these: **Go's test cache doesn't track the binaries the e2e tests build**, so
+`go test -tags integration ./...` reported a stale `ok` after `cmd/attribution` changed. The README
+now runs integration tests with `-count=1`.
 
 ## Results
 

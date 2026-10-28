@@ -49,11 +49,18 @@ func run() error {
 		slog.Info("applied migration", "migration", name)
 	}
 
-	nc, err := nats.Connect(cfg.natsURL, nats.Name("attribution"))
+	closed := make(chan struct{})
+	nc, err := nats.Connect(cfg.natsURL, nats.Name("attribution"),
+		nats.ClosedHandler(func(*nats.Conn) { close(closed) }))
 	if err != nil {
 		return fmt.Errorf("connect to NATS at %s: %w", cfg.natsURL, err)
 	}
-	defer nc.Drain()
+	// Drain only starts closing; wait until it's done so the last acks are sent before exit.
+	defer func() {
+		if err := nc.Drain(); err == nil {
+			<-closed
+		}
+	}()
 	js, err := jetstream.New(nc)
 	if err != nil {
 		return err

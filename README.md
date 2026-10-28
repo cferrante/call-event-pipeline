@@ -71,11 +71,13 @@ Calls to numbers missing from `tracking_numbers` are attributed to `unknown`. Ad
 
 ```bash
 go test ./...                     # unit tests; no services needed
-go test -tags integration ./...   # plus integration and end-to-end tests; needs .env loaded
+go test -tags integration -count=1 ./...   # plus integration and end-to-end tests; needs .env loaded
 ./loadtest/run.sh                 # spike test (needs k6), isolated from your dev data
 ```
 
-Integration tests start their own NATS server and throwaway databases. Without `.env` loaded
+Integration tests start their own NATS server and throwaway databases. `-count=1` turns off
+Go's test cache, which can't see what these tests depend on (the services they build and run,
+NATS, Postgres) and would otherwise report a stale `ok`. Without `.env` loaded
 they are skipped, which `go test` reports as `ok`; add `-v` to see `SKIP`.
 
 ## Why this project

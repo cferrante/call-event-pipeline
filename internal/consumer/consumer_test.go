@@ -5,6 +5,7 @@ package consumer
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/url"
 	"strings"
 	"sync"
@@ -54,6 +55,9 @@ type harness struct {
 	ctx  context.Context
 	js   jetstream.JetStream
 	cons jetstream.Consumer
+	// stopRun cancels Run as a shutdown signal would, and returns its error once it has
+	// returned. Safe to call more than once.
+	stopRun func() error
 }
 
 // start runs a NATS server with the LEADS stream, the DLQ and the attribution consumer, and
@@ -79,13 +83,16 @@ func start(t *testing.T, rec Recorder) harness {
 	runCtx, stop := context.WithCancel(ctx)
 	done := make(chan error, 1)
 	go func() { done <- Run(runCtx, cons, h) }()
-	t.Cleanup(func() {
+	stopRun := sync.OnceValue(func() error {
 		stop()
-		if err := <-done; err != nil {
+		return <-done
+	})
+	t.Cleanup(func() {
+		if err := stopRun(); err != nil {
 			t.Errorf("Run: %v", err)
 		}
 	})
-	return harness{ctx: ctx, js: js, cons: cons}
+	return harness{ctx: ctx, js: js, cons: cons, stopRun: stopRun}
 }
 
 func (h harness) publish(t *testing.T, id string) {
@@ -297,5 +304,67 @@ func TestSuccessOnFinalAttemptIsRecorded(t *testing.T) {
 	}
 	if n := len(h.dlqMessages(t)); n != 0 {
 		t.Errorf("dead-lettered %d messages, want 0", n)
+	}
+}
+
+// ctxRecorder succeeds slowly, and counts calls made with an already-cancelled context, as a
+// real database call would fail on one.
+type ctxRecorder struct {
+	delay     time.Duration
+	mu        sync.Mutex
+	calls     int
+	cancelled int
+}
+
+func (r *ctxRecorder) Record(ctx context.Context, _ envelope.Envelope) (bool, error) {
+	r.mu.Lock()
+	r.calls++
+	if ctx.Err() != nil {
+		r.cancelled++
+	}
+	r.mu.Unlock()
+	time.Sleep(r.delay)
+	return true, ctx.Err()
+}
+
+func (r *ctxRecorder) counts() (calls, cancelled int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.calls, r.cancelled
+}
+
+// On shutdown, messages already pulled into the client are finished, not failed: their
+// processing must not inherit the shutdown signal's cancelled context.
+func TestShutdownFinishesBufferedMessagesWithLiveContext(t *testing.T) {
+	rec := &ctxRecorder{delay: 20 * time.Millisecond}
+	h := start(t, rec)
+	for i := range 30 {
+		h.publish(t, fmt.Sprintf("CA%02d", i))
+	}
+	deadline := time.Now().Add(5 * time.Second)
+	for calls, _ := rec.counts(); calls == 0; calls, _ = rec.counts() {
+		if time.Now().After(deadline) {
+			t.Fatal("no message was processed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	if err := h.stopRun(); err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+
+	calls, cancelled := rec.counts()
+	if cancelled != 0 {
+		t.Errorf("%d of %d messages were processed with a cancelled context", cancelled, calls)
+	}
+	info, err := h.cons.Info(h.ctx)
+	if err != nil {
+		t.Fatalf("consumer info: %v", err)
+	}
+	if info.NumAckPending != 0 {
+		t.Errorf("ack pending after shutdown = %d, want 0: every delivered message should be finished", info.NumAckPending)
+	}
+	if int(info.Delivered.Consumer) != calls {
+		t.Errorf("deliveries = %d, Record calls = %d; want equal (no retries caused by shutdown)", info.Delivered.Consumer, calls)
 	}
 }
