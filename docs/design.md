@@ -2,6 +2,8 @@
 
 Status: **draft for review** · Stack: Go + NATS JetStream + Postgres (all native on Ubuntu/WSL2)
 
+New to the terms used here (stream, consumer, ack, …)? See the [concepts guide](concepts.md).
+
 ## 1. Goals
 
 1. Accept voice and SMS webhooks and acknowledge them fast enough that a traffic spike never

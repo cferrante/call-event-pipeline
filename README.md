@@ -15,6 +15,8 @@ afterwards, in independent consumers that each run at their own pace:
 A traffic spike shows up as a temporary backlog in the stream, not as dropped webhooks or a
 slower AI model.
 
+New to NATS or JetStream? Start with the [concepts guide](docs/concepts.md).
+
 ## Stack
 
 Go · NATS JetStream · PostgreSQL · k6 (load testing). Everything runs natively on Ubuntu
