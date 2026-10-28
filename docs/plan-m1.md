@@ -214,6 +214,17 @@ and you can start and stop NATS and Postgres yourself.
   service is down or restarting would be missed. The remaining gap (a crash *during* the final
   attempt) is a known limitation in the
   [spec](design.md#12-decisions-and-known-limitations), with the upgrade path.
+- **Step 10 is split into two commits:** 10a makes the ingest service runnable, 10b the
+  attribution service, the end-to-end test and the README.
+- **Step 10a: `cmd/sendhook`, a dev tool that sends correctly signed fake webhooks.** `curl`
+  can't conveniently compute Twilio's signature, and the click-through steps need one.
+- **Step 10a: `scripts/env-setup.sh` creates `.env` or adds variables it's missing**, turning
+  `change-me` placeholders into random secrets without touching existing values.
+  `db-setup.sh` previously only filled placeholders when creating `.env`, so an existing `.env`
+  would never have gained the new variables.
+- **Step 10a: optional `INGEST_FORWARD_TO`** chooses the voice TwiML (`<Dial>` or end the call),
+  and the HTTP server has read/write timeouts so stalled clients can't tie up connections
+  during a spike.
 
 ## Code-review outcomes
 

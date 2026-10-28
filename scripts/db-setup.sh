@@ -5,12 +5,7 @@
 set -euo pipefail
 cd "$(dirname "$0")/.."
 
-if [[ ! -f .env ]]; then
-  password=$(openssl rand -hex 24)
-  sed "s/change-me/${password}/" .env.example > .env
-  chmod 600 .env
-  echo "Created .env with a new random password for leads_app."
-fi
+./scripts/env-setup.sh
 set -a; source .env; set +a
 
 # Extract the password from DATABASE_URL (postgres://leads_app:<password>@...).

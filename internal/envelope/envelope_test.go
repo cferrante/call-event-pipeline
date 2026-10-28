@@ -210,3 +210,21 @@ func TestParseRejectsInvalidEvents(t *testing.T) {
 		})
 	}
 }
+
+func TestIsE164(t *testing.T) {
+	tests := map[string]bool{
+		"+14158675310":      true,
+		"+442071838750":     true,
+		"14158675310":       false, // no +
+		"+04158675310":      false, // country codes don't start with 0
+		"+1 415 867 5310":   false,
+		"+1234567890123456": false, // 16 digits
+		"":                  false,
+		"anonymous":         false,
+	}
+	for in, want := range tests {
+		if got := IsE164(in); got != want {
+			t.Errorf("IsE164(%q) = %v, want %v", in, got, want)
+		}
+	}
+}

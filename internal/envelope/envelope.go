@@ -93,6 +93,11 @@ func Parse(data []byte) (Envelope, error) {
 // e164 matches a phone number in E.164 format: "+", then 2 to 15 digits, not starting with 0.
 var e164 = regexp.MustCompile(`^\+[1-9][0-9]{1,14}$`)
 
+// IsE164 reports whether s is a phone number in E.164 format, e.g. +14158675310.
+func IsE164(s string) bool {
+	return e164.MatchString(s)
+}
+
 // withheldCallerIDs are the numbers Twilio has used for withheld caller ID: the word typed
 // on a phone keypad (ANONYMOUS → 266696687). Newer calls send the word itself instead.
 var withheldCallerIDs = keypadNumbers("ANONYMOUS", "RESTRICTED", "BLOCKED", "UNAVAILABLE", "UNKNOWN")
@@ -104,7 +109,7 @@ func (e Envelope) AnonymousCaller() bool {
 	if !strings.HasPrefix(from, "+") {
 		from = "+" + from
 	}
-	return !e164.MatchString(from) || withheldCallerIDs[strings.TrimPrefix(from, "+")]
+	return !IsE164(from) || withheldCallerIDs[strings.TrimPrefix(from, "+")]
 }
 
 // keypadNumbers returns the digits each word produces on a phone keypad.
