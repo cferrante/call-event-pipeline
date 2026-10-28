@@ -56,14 +56,7 @@ func run() error {
 	mux.Handle("POST /webhooks/voice", newWebhook(cfg, envelope.Voice, pub, voiceResponse(cfg.forwardTo)))
 	mux.Handle("POST /webhooks/sms", newWebhook(cfg, envelope.SMS, pub, smsResponse))
 
-	srv := &http.Server{
-		Addr:    cfg.addr,
-		Handler: mux,
-		// Limits stop slow or stalled clients from tying up connections during a spike.
-		ReadHeaderTimeout: 5 * time.Second,
-		ReadTimeout:       10 * time.Second,
-		WriteTimeout:      15 * time.Second,
-	}
+	srv := newHTTPServer(cfg.addr, mux)
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	slog.Info("ingest listening", "config", cfg)
@@ -80,6 +73,22 @@ func run() error {
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	return nil
+}
+
+// newHTTPServer returns the server with its timeouts set.
+func newHTTPServer(addr string, h http.Handler) *http.Server {
+	return &http.Server{
+		Addr:    addr,
+		Handler: h,
+		// Limits stop slow or stalled clients from tying up connections during a spike.
+		ReadHeaderTimeout: 5 * time.Second,
+		ReadTimeout:       10 * time.Second,
+		WriteTimeout:      15 * time.Second,
+		// Keep idle connections longer than clients do (90s for Go clients), so the client
+		// closes them first. If the server closed first, a client could send a request on a
+		// closing connection and get no response at all. Unset, Go would use ReadTimeout (10s).
+		IdleTimeout: 120 * time.Second,
+	}
 }
 
 func newWebhook(cfg config, ch envelope.Channel, pub publisher, response string) *webhook {

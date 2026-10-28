@@ -1,12 +1,14 @@
-// Package consumer runs the attribution consumer: it reads lead events from the LEADS
-// stream, records them, and acks, retries or dead-letters each one.
+// Package consumer runs a durable consumer on the LEADS stream (attribution or inference): it
+// reads lead events, records them, and acks, retries or dead-letters each one.
 package consumer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -17,16 +19,14 @@ import (
 )
 
 const (
-	// ConsumerName is the durable JetStream consumer for attribution.
-	ConsumerName = "attribution"
-
 	// DLQStream holds messages that can never be processed, for a human to inspect.
 	DLQStream  = "LEADS_DLQ"
 	DLQSubject = "leads.dlq"
 
 	// Headers added to each dead letter.
-	HeaderReason  = "Dlq-Reason"  // why it was dead-lettered
-	HeaderSubject = "Dlq-Subject" // the subject it was originally published on
+	HeaderReason   = "Dlq-Reason"   // why it was dead-lettered
+	HeaderSubject  = "Dlq-Subject"  // the subject it was originally published on
+	HeaderConsumer = "Dlq-Consumer" // the consumer that gave up on it
 
 	// ackWait is how long JetStream waits for an ack before redelivering.
 	ackWait = 30 * time.Second
@@ -35,14 +35,40 @@ const (
 	recordTimeout = 20 * time.Second
 	// maxDeliver is the most attempts a message gets; the last one dead-letters on failure.
 	maxDeliver = 5
-	// pullBatch is the most messages the client buffers; one more may be in progress. AckWait
-	// counts down for each while it waits in the buffer, so all of them must be processable well
-	// within AckWait even when writes are slow: (10 + 1) × 2s = 22s < 30s.
+	// pullBatch is the most messages the client buffers. On top of those, each worker may be
+	// processing one and the fetch loop may hold one waiting for a free worker. AckWait counts
+	// down for all of them, so they must be processable well within it even when writes are
+	// slow; for attribution's single worker: (10 + 1 + 1) × 2s = 24s < 30s. Inference is also
+	// capped by MaxAckPending on the server.
 	pullBatch = 10
 )
 
 // defaultRetryDelays grow with each attempt; the last one repeats.
 var defaultRetryDelays = []time.Duration{time.Second, 5 * time.Second, 30 * time.Second}
+
+// Config describes one durable consumer on the LEADS stream.
+type Config struct {
+	Name string // durable consumer name
+	// MaxAckPending caps unfinished messages across all of this consumer's workers, enforced
+	// by JetStream on the server. 0 means JetStream's default.
+	MaxAckPending int
+	// Workers is how many messages one process handles at once.
+	Workers int
+	// StartAtNew makes a newly created consumer start with messages published from then on,
+	// instead of the whole stream. JetStream fixes this when the consumer is created.
+	StartAtNew bool
+}
+
+// Attribution is the attribution consumer: one message at a time.
+var Attribution = Config{Name: "attribution", Workers: 1}
+
+// Inference is the inference consumer with the given number of workers, which should match
+// the model's capacity. MaxAckPending is set to the same number, so JetStream never hands out
+// more unfinished messages than the workers (and the model) can take.
+func Inference(workers int) Config {
+	// StartAtNew: a first start mustn't spend model capacity on the stream's 7-day history.
+	return Config{Name: "inference", Workers: workers, MaxAckPending: workers, StartAtNew: true}
+}
 
 // Recorder stores an event, reporting false if it was already stored.
 type Recorder interface {
@@ -53,7 +79,7 @@ type Recorder interface {
 // consumer. It deliberately sets no BackOff: JetStream uses BackOff's first value in place of
 // AckWait, so slow processing would be redelivered while still running. Retry delays come
 // from NakWithDelay instead.
-func EnsureConsumer(ctx context.Context, js jetstream.JetStream) (jetstream.Consumer, error) {
+func EnsureConsumer(ctx context.Context, js jetstream.JetStream, cfg Config) (jetstream.Consumer, error) {
 	if _, err := js.CreateOrUpdateStream(ctx, jetstream.StreamConfig{
 		Name:     DLQStream,
 		Subjects: []string{DLQSubject},
@@ -62,37 +88,78 @@ func EnsureConsumer(ctx context.Context, js jetstream.JetStream) (jetstream.Cons
 	}); err != nil {
 		return nil, fmt.Errorf("ensure stream %s: %w", DLQStream, err)
 	}
+	deliver := jetstream.DeliverAllPolicy
+	if cfg.StartAtNew {
+		deliver = jetstream.DeliverNewPolicy
+	}
 	cons, err := js.CreateOrUpdateConsumer(ctx, stream.StreamName, jetstream.ConsumerConfig{
-		Durable:   ConsumerName,
-		AckPolicy: jetstream.AckExplicitPolicy,
-		AckWait:   ackWait,
+		Durable:       cfg.Name,
+		DeliverPolicy: deliver,
+		AckPolicy:     jetstream.AckExplicitPolicy,
+		AckWait:       ackWait,
+		MaxAckPending: cfg.MaxAckPending,
 		// One spare delivery: if dead-lettering fails on the final attempt (or the worker
 		// crashes during it), JetStream redelivers once more instead of stranding the message.
 		MaxDeliver: maxDeliver + 1,
 	})
 	if err != nil {
-		return nil, fmt.Errorf("ensure consumer %s: %w", ConsumerName, err)
+		// JetStream can't change where an existing consumer starts; say how to fix it.
+		if existing, infoErr := js.Consumer(ctx, stream.StreamName, cfg.Name); infoErr == nil &&
+			existing.CachedInfo().Config.DeliverPolicy != deliver {
+			return nil, fmt.Errorf("consumer %s already exists with a different start position, which "+
+				"JetStream can't change; restart once with -reset-consumer to delete and recreate it "+
+				"(it then starts at new messages): %w", cfg.Name, err)
+		}
+		return nil, fmt.Errorf("ensure consumer %s: %w", cfg.Name, err)
 	}
 	return cons, nil
 }
 
+// ResetConsumer deletes the named consumer, if it exists, so EnsureConsumer recreates it with
+// the current settings. Its progress is lost: a reset inference consumer starts at new messages.
+func ResetConsumer(ctx context.Context, js jetstream.JetStream, name string) error {
+	err := js.DeleteConsumer(ctx, stream.StreamName, name)
+	if err != nil && !errors.Is(err, jetstream.ErrConsumerNotFound) {
+		return fmt.Errorf("reset consumer %s: %w", name, err)
+	}
+	return nil
+}
+
 // Handler decides what happens to each message.
 type Handler struct {
+	consumer    string
 	js          jetstream.JetStream
 	rec         Recorder
 	retryDelays []time.Duration
 }
 
-func NewHandler(js jetstream.JetStream, rec Recorder) *Handler {
-	return &Handler{js: js, rec: rec, retryDelays: defaultRetryDelays}
+func NewHandler(consumer string, js jetstream.JetStream, rec Recorder) *Handler {
+	return &Handler{consumer: consumer, js: js, rec: rec, retryDelays: defaultRetryDelays}
 }
 
-// Run processes messages until ctx is cancelled, then finishes in-flight work and returns.
-// Cancelling ctx stops fetching; messages already received are still processed, with a
-// context the shutdown can't cancel (each attempt keeps its own time limit).
-func Run(ctx context.Context, cons jetstream.Consumer, h *Handler) error {
+// Run processes messages with the given number of workers until ctx is cancelled, then
+// finishes in-flight work and returns. Cancelling ctx stops fetching; messages already
+// received are still processed, with a context the shutdown can't cancel (each attempt keeps
+// its own time limit).
+func Run(ctx context.Context, cons jetstream.Consumer, h *Handler, workers int) error {
 	workCtx := context.WithoutCancel(ctx)
-	cc, err := cons.Consume(func(msg jetstream.Msg) { h.Handle(workCtx, msg) },
+	// Unbuffered: the fetch loop hands a message over only when a worker is free, so the
+	// client holds at most pullBatch waiting messages plus one per worker.
+	work := make(chan jetstream.Msg)
+	var wg sync.WaitGroup
+	for range max(1, workers) {
+		wg.Go(func() {
+			for msg := range work {
+				h.Handle(workCtx, msg)
+			}
+		})
+	}
+	defer func() {
+		close(work) // safe: no more messages arrive once Consume has stopped
+		wg.Wait()
+	}()
+
+	cc, err := cons.Consume(func(msg jetstream.Msg) { work <- msg },
 		jetstream.PullMaxMessages(pullBatch))
 	if err != nil {
 		return fmt.Errorf("start consuming: %w", err)
@@ -141,9 +208,13 @@ func (h *Handler) deadLetter(ctx context.Context, msg jetstream.Msg, cause error
 	out.Data = msg.Data()
 	out.Header.Set(HeaderReason, cause.Error())
 	out.Header.Set(HeaderSubject, msg.Subject())
+	out.Header.Set(HeaderConsumer, h.consumer)
 	if meta, err := msg.Metadata(); err == nil {
-		// Dedupes the dead letter if we crash after storing it but before terminating.
-		out.Header.Set(nats.MsgIdHdr, stream.StreamName+"-"+strconv.FormatUint(meta.Sequence.Stream, 10))
+		// Dedupes the dead letter if we crash after storing it but before terminating. The
+		// consumer is part of the ID: another consumer giving up on the same message is a
+		// separate dead letter, not a duplicate.
+		out.Header.Set(nats.MsgIdHdr,
+			stream.StreamName+"-"+strconv.FormatUint(meta.Sequence.Stream, 10)+"-"+h.consumer)
 	}
 
 	if _, err := h.js.PublishMsg(ctx, out); err != nil {
@@ -151,7 +222,7 @@ func (h *Handler) deadLetter(ctx context.Context, msg jetstream.Msg, cause error
 		_ = msg.NakWithDelay(h.retryDelay(msg))
 		return
 	}
-	slog.Warn("dead-lettered message", "subject", msg.Subject(), "reason", cause)
+	slog.Warn("dead-lettered message", "consumer", h.consumer, "subject", msg.Subject(), "reason", cause)
 	if err := msg.Term(); err != nil {
 		slog.Error("term failed", "err", err)
 	}

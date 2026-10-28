@@ -13,6 +13,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
+	"github.com/cferrante/decoupled-ingestion-layer/internal/env"
 	"github.com/cferrante/decoupled-ingestion-layer/internal/migrate"
 	"github.com/cferrante/decoupled-ingestion-layer/migrations"
 )
@@ -31,7 +32,7 @@ func Empty(t *testing.T) *pgxpool.Pool {
 
 	admin, err := pgx.Connect(ctx, baseURL)
 	if err != nil {
-		t.Fatalf("connect to %s: %v", redact(baseURL), err)
+		t.Fatalf("connect to %s: %v", env.Redact(baseURL), err)
 	}
 	name := "leads_test_" + randomHex(t)
 	ident := pgx.Identifier{name}.Sanitize()
@@ -79,13 +80,4 @@ func randomHex(t *testing.T) string {
 		t.Fatalf("random name: %v", err)
 	}
 	return hex.EncodeToString(b)
-}
-
-// redact hides the password so it never appears in test output.
-func redact(rawURL string) string {
-	u, err := url.Parse(rawURL)
-	if err != nil {
-		return "DATABASE_URL"
-	}
-	return u.Redacted()
 }

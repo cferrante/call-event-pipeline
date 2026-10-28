@@ -13,12 +13,30 @@ Numbers are only comparable between rows with the same machine.
 |---|---|---|---|---|---|---|---|---|---|
 | 2026-10-28 | `2f7278d` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s | 0.42 / 1.03 ms | 0.000% | 22675 | 27s | ✓ 67499 | 0 |
 | 2026-10-28 | `607534e` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s | 0.47 / 2.02 ms | 0.000% | 27123 | 37s | ✓ 67499 | 0 |
+| 2026-10-28 | `8fcfd76` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s; + inference (normal) | 0.71 / 3.60 ms | 0.000% | 44105 | 154s | ✓ 67999 | 0 |
+| 2026-10-28 | `8fcfd76` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s; + inference (control) | 0.71 / 3.66 ms | 0.000% | 41741 | 90s | ✓ 67999 | 10 (inference) |
+| 2026-10-28 | `b0c2515` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s; + inference (normal) | 0.67 / 3.04 ms | 0.000% | 40749 | 142s | ✓ 67999 | 0 |
+| 2026-10-28 | `b0c2515` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s; + inference (control) | 0.71 / 3.17 ms | 0.000% | 41671 | 682s | ✓ 67999 | 0 |
 
 Columns: **Load** is peak rate, ramp and hold. **Edge** latency is k6's view of the ingest
 service. **Peak lag** is the attribution consumer's largest backlog, and **Drained after** is how
 long after the spike ended it reached 0. **Rows** is interactions in Postgres, ✓ when it's at
 least the unique webhooks that got a 200 (zero loss) and at most the unique webhooks sent (zero
 duplicates).
+
+## Inference (M2)
+
+| Date | Commit | Mode | Model p95 idle / spike | Time to insight p95 idle / spike | Peak inference lag | Drained after | Insights | Model timeouts | Dead letters |
+|---|---|---|---|---|---|---|---|---|---|
+| 2026-10-28 | `8fcfd76` | normal, 4 workers | 11 / 11 ms | 16 ms / 149 s | 45642 | 162s | 67999 (all) | 0 | 0 |
+| 2026-10-28 | `8fcfd76` | control, 200 workers | 12 / 190 ms | 17 ms / 287 s | 47503 | 321s | 67989 (10 lost) | 29610 | 10 |
+| 2026-10-28 | `b0c2515` | normal, 4 workers | 11.85 / 11.66 ms | 17 ms / 148 s | 45402 | 163s | 67999 (all) | 0 | 0 |
+| 2026-10-28 | `b0c2515` | control, 200 workers | 11.84 / 189.76 ms | 16 ms / 797 s | 51754 | 837s | 67999 (all, after retries) | 25134 | 0 |
+
+Rows come from the same runs as the table above (`run.sh` prints both). **Mode** is `normal`
+(workers = model capacity) or `control` (the limit removed). The load-test model profile is
+10 ms latency, 200 ms timeout, capacity 4 (see the [M2 plan](plan-m2.md#deviations-from-the-plan)).
+Model latency should stay flat in `normal`; time to insight rises during the spike by design.
 
 ## Notes
 
@@ -56,3 +74,61 @@ Change: the attribution consumer pulls at most 10 messages per batch instead of 
 Peak lag 27,123 and drain 37s, against the baseline's 22,675 and 27s. That's within the
 run-to-run variance noted above: an earlier run of the old code peaked at 28,134 and also
 drained in 37s. **No measurable change in throughput**; the edge was unaffected (p99 2.0 ms).
+
+### 2026-10-28, `8fcfd76`: M2 inference, normal and control
+
+Both runs: 20 s idle at 20/s, then 1,000/s (ramp 10 s, hold 60 s), with ingest, attribution and
+inference running; load-test model profile (10 ms, timeout 200 ms, capacity 4).
+
+**Normal (4 workers): model latency stayed flat.** Model p95 was 11 ms idle and 11 ms across
+60,000 spike messages, with no timeouts. Time to insight rose from 16 ms to 149 s (p95) and
+recovered: the waiting happened in the stream. Inference lag (messages waiting):
+
+```
+   20s      0
+   40s   8885 ##############
+   60s  22794 ######################################
+   90s  43741 ########################################################################   spike ends
+  120s  38575 ################################################################
+  150s  30137 ##################################################
+  180s  21453 ###################################
+  210s  13052 #####################
+  240s   4588 #######
+  250s   1680 ##                                                                           drained ~262s
+```
+
+**Control (200 workers): the model overloaded.** Model p95 rose from 12 ms to 190 ms (16×),
+29,610 calls timed out and were retried, and 10 messages ran out of retries and were
+dead-lettered. **With 50 times the workers, inference drained in 321 s instead of 162 s:**
+retries spent model capacity on calls that failed again (congestion collapse). The bounded
+worker pool is what prevents this.
+
+**The edge was unaffected in both** (0 errors, p99 3.6 ms), as designed.
+
+**Attribution drained more slowly than in M1** (154 s here against 27–37 s). JetStream keeps
+the consumers' queues separate, but both services share one Postgres and one CPU: inference
+writes about 400 insights/s, plus an existence check each, alongside attribution's writes. Run
+to run variance is also large (an earlier run on `4ed6e5b` drained attribution in 41 s). A
+resource-level bulkhead, such as separate connection limits or databases, would be the next
+step if attribution's drain time mattered.
+
+**Not in the table:** the first full run, on `4ed6e5b`, failed 2 of 71,372 requests. That led
+to finding and fixing the ingest server's 10-second idle timeout in `8fcfd76` (see the
+[M2 plan](plan-m2.md#deviations-from-the-plan)); both runs above are after the fix.
+
+### 2026-10-28, `b0c2515`: after the M2 code-review fixes
+
+Re-run because three fixes changed how results are measured: model latency is now fractional
+(not whole milliseconds), the drain wait checks row counts, and the windows start at the first
+interaction.
+
+**Normal: unchanged.** Model p95 11.85 ms idle and 11.66 ms in the spike; time to insight p95 148 s;
+zero loss, nothing dead-lettered.
+
+**Control: overloaded again, but much slower to drain** than the earlier control run: inference
+837 s (was 321 s), attribution 682 s (was 90 s), and 0 dead letters (was 10). None of the fixes
+changed what the services do in control mode, so this is most likely variance amplified by
+overload: 200 workers retrying against the same Postgres and CPU slow everything, attribution
+included, by amounts that differ a lot between runs. One run of each isn't enough to say more.
+It does reinforce the earlier note: the stream keeps the queues separate, but protecting
+attribution from an overloaded neighbour would need a resource-level bulkhead too.

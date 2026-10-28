@@ -12,6 +12,8 @@ const TOKEN = __ENV.TOKEN;           // the service's TWILIO_AUTH_TOKEN
 const RATE = Number(__ENV.RATE || 1000);
 const RAMP = __ENV.RAMP || '10s';
 const HOLD = __ENV.HOLD || '60s';
+const IDLE = __ENV.IDLE || '0s'; // a gentle period before the spike, as a baseline
+const IDLE_RATE = Number(__ENV.IDLE_RATE || 0);
 const DUP_RATE = Number(__ENV.DUP_RATE || 0.05);
 const SUMMARY_FILE = __ENV.SUMMARY_FILE || 'summary.env';
 
@@ -21,11 +23,12 @@ export const options = {
   scenarios: {
     spike: {
       executor: 'ramping-arrival-rate',
-      startRate: 0,
+      startRate: IDLE !== '0s' ? IDLE_RATE : 0,
       timeUnit: '1s',
       preAllocatedVUs: 200,
       maxVUs: 2000,
       stages: [
+        ...(IDLE !== '0s' ? [{ target: IDLE_RATE, duration: IDLE }] : []),
         { target: RATE, duration: RAMP },
         { target: RATE, duration: HOLD },
         { target: 0, duration: '5s' },
@@ -53,6 +56,16 @@ function sign(params) {
   return crypto.hmac('sha1', TOKEN, data, 'base64');
 }
 
+// post sends one webhook and reports whether it got a 200. Anything else is logged with its
+// status and error, so a failed run says what failed (status 0 means no HTTP response at all).
+function post(body, req, id) {
+  const res = http.post(TARGET + WEBHOOK_PATH, body, req);
+  if (res.status !== 200) {
+    console.error(`unexpected response: id=${id} status=${res.status} error_code=${res.error_code} error="${res.error}"`);
+  }
+  return res.status === 200;
+}
+
 export default function () {
   const i = exec.scenario.iterationInTest;
   const params = {
@@ -67,10 +80,10 @@ export default function () {
   };
 
   uniqueSent.add(1);
-  let accepted = http.post(TARGET + WEBHOOK_PATH, body, req).status === 200;
+  let accepted = post(body, req, params.CallSid);
   if (Math.random() < DUP_RATE) {
     duplicatesSent.add(1);
-    accepted = http.post(TARGET + WEBHOOK_PATH, body, req).status === 200 || accepted;
+    accepted = post(body, req, params.CallSid) || accepted;
   }
   if (accepted) {
     uniqueAccepted.add(1);

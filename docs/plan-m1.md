@@ -1,6 +1,6 @@
 # Plan: milestone 1 (M1)
 
-Status: **draft for review** · Spec: [design.md](design.md)
+Status: **complete** · Spec: [design.md](design.md)
 
 M1 goal: ingest edge → JetStream → attribution consumer → Postgres, with a dead-letter path and
 a k6 spike test proving zero lost and zero duplicated interactions.

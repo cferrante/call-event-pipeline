@@ -24,9 +24,10 @@ Go · NATS JetStream · PostgreSQL · k6 (load testing). Everything runs nativel
 
 ## Status
 
-Milestone 1 in progress: the services run end to end and pass the spike test (see
-[benchmarks](docs/benchmarks.md)); the conversation report and code review are next. See the [design spec](docs/design.md) for the architecture and decisions, and the
-[M1 plan](docs/plan-m1.md) for progress.
+Milestones 1 and 2 are complete: webhooks are ingested, attributed and classified by a (stub) AI
+model, and the spike test shows zero loss and flat model latency at 1,000 webhooks/s (see
+[benchmarks](docs/benchmarks.md)). See the [design spec](docs/design.md) for the architecture and
+decisions, and the [M1](docs/plan-m1.md) and [M2](docs/plan-m2.md) plans for how each was built.
 
 - **M1:** ingest edge, attribution consumer, dead-letter handling, spike test proving zero
   loss and zero duplicates
@@ -49,10 +50,15 @@ in each terminal first)
 ```bash
 nats-server -js -sd ./data/nats -m 8222   # 1. message broker, data kept in ./data
 go run ./cmd/attribution                  # 2. applies migrations, then consumes events
-go run ./cmd/ingest                       # 3. webhook endpoint on $INGEST_PORT
+go run ./cmd/inference                    # 3. classifies events with the (stub) AI model
+go run ./cmd/ingest                       # 4. webhook endpoint on $INGEST_PORT
 ```
 
 Stop any of them with Ctrl-C; each finishes in-flight work first.
+
+If inference refuses to start because its consumer "already exists with a different start
+position" (one created before it started at new messages), run it once as
+`go run ./cmd/inference -reset-consumer`.
 
 **Try it**
 
@@ -62,6 +68,8 @@ go run ./cmd/sendhook -channel sms    # an SMS
 go run ./cmd/sendhook -bad-signature  # → 403
 psql "$DATABASE_URL" -c 'SELECT provider_id, source, lead_id FROM interactions'
 psql "$DATABASE_URL" -c 'SELECT * FROM campaign_conversations'   # conversations per campaign
+go run ./cmd/sendhook -channel sms -body "what's the price?"      # an SMS the model classifies as sales
+psql "$DATABASE_URL" -c 'SELECT provider_id, intent, score, model_ms FROM insights'
 ```
 
 Calls to numbers missing from `tracking_numbers` are attributed to `unknown`. Add one with
@@ -73,6 +81,7 @@ Calls to numbers missing from `tracking_numbers` are attributed to `unknown`. Ad
 go test ./...                     # unit tests; no services needed
 go test -tags integration -count=1 ./...   # plus integration and end-to-end tests; needs .env loaded
 ./loadtest/run.sh                 # spike test (needs k6), isolated from your dev data
+MODE=control ./loadtest/run.sh    # same spike without the inference limit: the model overloads
 ```
 
 Integration tests start their own NATS server and throwaway databases. `-count=1` turns off

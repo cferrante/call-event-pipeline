@@ -9,13 +9,11 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/cferrante/decoupled-ingestion-layer/internal/env"
 	"github.com/cferrante/decoupled-ingestion-layer/internal/envelope"
 )
 
-const (
-	defaultPort    = 8080
-	defaultNATSURL = "nats://127.0.0.1:4222"
-)
+const defaultPort = 8080
 
 // config is the ingest service's settings, read from environment variables.
 type config struct {
@@ -36,7 +34,7 @@ func loadConfig() (config, error) {
 	cfg := config{
 		addr:      addr,
 		authToken: os.Getenv("TWILIO_AUTH_TOKEN"),
-		natsURL:   os.Getenv("NATS_URL"),
+		natsURL:   env.NATSURL(),
 		forwardTo: os.Getenv("INGEST_FORWARD_TO"),
 	}
 	if cfg.authToken == "" {
@@ -44,9 +42,6 @@ func loadConfig() (config, error) {
 	}
 	if cfg.publicURL, err = parsePublicURL(os.Getenv("INGEST_PUBLIC_URL")); err != nil {
 		return config{}, err
-	}
-	if cfg.natsURL == "" {
-		cfg.natsURL = defaultNATSURL
 	}
 	if cfg.forwardTo != "" && !envelope.IsE164(cfg.forwardTo) {
 		return config{}, fmt.Errorf("INGEST_FORWARD_TO must be an E.164 number like +14158675310, got %q", cfg.forwardTo)
