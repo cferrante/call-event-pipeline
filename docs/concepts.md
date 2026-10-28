@@ -173,6 +173,14 @@ message as `NumDelivered` in its metadata. 1 means first delivery.
 Stop receiving new messages, finish the ones already in progress, then close.
 *In this project:* the attribution worker drains on shutdown so no message is half-processed.
 
+### Dual write
+
+Updating two separate systems, such as saving to a database and then publishing a message, as
+if it were one step. Nothing makes them succeed or fail together, so a crash between the two
+leaves them disagreeing: the row is saved but the event is never published, or the reverse.
+*In this project:* a reason priority lanes wait until M3; the safe way to do it is the
+[transactional outbox](#transactional-outbox).
+
 ### Duplicate window
 
 How long a [stream](#stream) remembers [message IDs](#message-id); a message published with an
@@ -261,6 +269,15 @@ within its [duplicate window](#duplicate-window).
 A numbered SQL file that changes the database schema. Each is applied once, in order, and never
 edited afterwards; changes go in a new file.
 *In this project:* `migrations/`, applied by `go run ./cmd/migrate`.
+
+### Model latency
+
+How long one call to the AI model takes, from sending the input to receiving the result. It
+measures the model alone, not time spent waiting in a queue beforehand; compare
+[time to insight](#time-to-insight).
+*In this project (M2):* the metric that must stay flat during a spike, because the worker pool
+never sends the model more calls at once than it can handle. See the
+[M2 plan](plan-m2.md#d5-what-to-measure).
 
 ### Nak
 
@@ -352,11 +369,30 @@ work per second than is arriving (lower throughput), which is exactly when lag b
 consumer processes them, so lag grows during the spike and drains afterwards; see
 [benchmarks](benchmarks.md).
 
+### Time to insight
+
+How long from a webhook arriving to its AI result being stored: the time spent waiting in the
+stream ([consumer lag](#consumer-lag)) plus [model latency](#model-latency).
+*In this project (M2):* expected to rise during a spike, while work waits its turn, and to
+recover afterwards. That's the design working: the wait happens in the queue, not inside an
+overloaded model. See the [M2 plan](plan-m2.md#d5-what-to-measure).
+
 ### Tracking number
 
 A phone number assigned to one marketing campaign, so a call to it shows which campaign
 produced it.
 *In this project:* the `tracking_numbers` table.
+
+### Transactional outbox
+
+A pattern that solves the [dual write](#dual-write) problem. Instead of publishing a message
+directly, the program writes it to an `outbox` table **in the same database transaction** as
+the change it describes, so both are saved or neither is. A separate relay then reads the
+outbox and publishes each message, marking it sent. If the relay crashes, it publishes again
+on restart, so delivery is [at-least-once](#delivery-guarantees) and consumers must be
+[idempotent](#idempotency).
+*In this project:* planned for M3, so attribution can safely publish "first touch" and "repeat"
+events to separate inference lanes.
 
 ### TwiML
 
