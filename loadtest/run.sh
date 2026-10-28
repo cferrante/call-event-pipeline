@@ -120,8 +120,9 @@ k6_status=0
 k6 run --quiet -e TARGET="$PUBLIC_URL" -e PUBLIC_URL="$PUBLIC_URL" -e TOKEN="$TOKEN" \
   -e RATE="$RATE" -e RAMP="$RAMP" -e HOLD="$HOLD" -e DUP_RATE="$DUP_RATE" \
   -e IDLE="$IDLE" -e IDLE_RATE="$IDLE_RATE" \
-  -e SUMMARY_FILE="$RESULTS/summary.env" loadtest/spike.js || k6_status=$?
+  -e SUMMARY_FILE="$RESULTS/summary.env" loadtest/spike.js 2>"$RESULTS/k6.log" || k6_status=$?
 source "$RESULTS/summary.env"
+unexpected=$(grep -c 'unexpected response' "$RESULTS/k6.log" || true)
 
 log "k6 finished; waiting for both consumers to drain (up to ${DRAIN_TIMEOUT}s)"
 drain_start=$(date +%s) attribution_drain_s=""
@@ -182,7 +183,7 @@ check() { # check <description> <condition...>
   echo "  requests sent             ${REQUESTS} (${DUPLICATES_SENT} deliberate duplicates)"
   echo "  unique webhooks sent       ${UNIQUE_SENT}, accepted ${UNIQUE_ACCEPTED}"
   echo "  edge latency ms            p50 ${P50_MS}  p95 ${P95_MS}  p99 ${P99_MS}  max ${MAX_MS}"
-  echo "  failed requests            $(python3 -c "print(f'{${FAILED_RATE} * 100:.3f}%')")"
+  echo "  failed requests            $(python3 -c "print(f'{${FAILED_RATE} * 100:.3f}%')") (${unexpected} logged in k6.log)"
   echo "  interactions               ${rows} (${unknown} to the unknown number, ${leads} leads)"
   echo "  attribution lag            peak ${max_lag}; drained ${attribution_drain_s}s after k6 finished"
   echo "  insights                   ${insights}"
