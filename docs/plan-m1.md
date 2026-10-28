@@ -197,6 +197,9 @@ and you can start and stop NATS and Postgres yourself.
 - **Step 7: the interaction is inserted before the lead is touched**, reversing the spec's
   original order, so a redelivered message is a complete no-op. See
   [delivery guarantees](design.md#55-delivery-guarantees).
+- **Step 7: the tracking-number lookup is part of the interaction insert** (one SQL statement
+  with a `LEFT JOIN`), not a separate query. The insert needs the campaign anyway, and one
+  statement keeps the gate and the lookup in a single round trip.
 
 ## Code-review outcomes
 
