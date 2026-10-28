@@ -184,4 +184,20 @@ _None yet._
 
 ## Results
 
-_Recorded in step 6._
+### Spike test
+
+At `8fcfd76`, `./loadtest/run.sh` (normal) and `MODE=control ./loadtest/run.sh`: 20 s idle at 20/s,
+then 1,000/s for 70 s, with the load-test model profile. **Both PASS.** Details and curves are in
+[benchmarks](benchmarks.md).
+
+| Target ([spec section 8](design.md#8-measuring-absorbing-spikes)) | Result | |
+|---|---|---|
+| Model latency p95 flat (±10%) between idle and spike | 11 ms idle, 11 ms spike | ✓ |
+| Time to insight rises during the spike, recovers after | p95 16 ms idle → 149 s spike; backlog drained 162 s after | ✓ |
+| Inference loss/duplicates | 67,999 accepted, 67,999 insights; 0 dead letters | ✓ |
+| Control run: model visibly overloaded | p95 12 → 190 ms, 29,610 timeouts, 10 dead letters | ✓ |
+| Edge and attribution as in M1 | Edge: 0 errors, p99 3.6 ms. Attribution: zero loss, but slower to drain (154 s), since it shares Postgres and CPU with inference | ✓ with note |
+
+The control run also showed the strongest argument for the worker pool: with 50 times the
+workers, inference finished in twice the time, because retries of timed-out calls used up
+model capacity (congestion collapse).
