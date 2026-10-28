@@ -90,6 +90,7 @@ can slow the edge, because the stream sits between them.
 | Retention | Limits (max age 7d) | Lets new consumers (e.g. M2) replay history |
 | Duplicate window | 10 min | Covers provider retry bursts; DB constraint covers beyond |
 | Consumer `attribution` | Durable pull, `AckExplicit`, `AckWait 30s`, `MaxDeliver 6` (5 attempts + 1 spare), no `BackOff` | Pull lets workers fetch only what they can handle |
+| Client pull batch | 10 messages (`PullMaxMessages`) | `AckWait` counts down while a message waits in the client's buffer; a small batch can always be processed within it, even with slow writes |
 | Retry delays | `NakWithDelay` 1s, 5s, then 30s per attempt | JetStream's `BackOff` replaces `AckWait` with its first value, so a write slower than 1s would be redelivered while still running ([section 5.5](#55-delivery-guarantees)) |
 | Stream `LEADS_DLQ` | Subject `leads.dlq`, file storage, max age 30d | Messages that can never succeed, kept for a human to inspect |
 

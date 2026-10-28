@@ -415,3 +415,36 @@ func TestFailedDeadLetterOnFinalAttemptIsRetried(t *testing.T) {
 		t.Errorf("dead-lettered %d messages, want 1", n)
 	}
 }
+
+// AckWait counts down for every message the client holds, including ones still waiting in its
+// buffer. With a large buffer and slow writes, buffered messages expire and are redelivered
+// before they're even handled, so the client must never hold more than a small batch.
+func TestClientHoldsOnlyASmallBatch(t *testing.T) {
+	rec := &ctxRecorder{delay: 10 * time.Millisecond}
+	h := start(t, rec)
+	for i := range 100 {
+		h.publish(t, fmt.Sprintf("CA%03d", i))
+	}
+
+	maxHeld := 0
+	deadline := time.Now().Add(10 * time.Second)
+	for {
+		info, err := h.cons.Info(h.ctx)
+		if err != nil {
+			t.Fatalf("consumer info: %v", err)
+		}
+		maxHeld = max(maxHeld, info.NumAckPending)
+		if info.NumPending == 0 && info.NumAckPending == 0 {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("backlog did not drain")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+
+	// The buffer holds up to pullBatch; the message being processed has already left it.
+	if maxHeld > pullBatch+1 {
+		t.Errorf("client held up to %d unacked messages, want at most %d", maxHeld, pullBatch+1)
+	}
+}

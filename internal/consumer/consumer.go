@@ -35,6 +35,10 @@ const (
 	recordTimeout = 20 * time.Second
 	// maxDeliver is the most attempts a message gets; the last one dead-letters on failure.
 	maxDeliver = 5
+	// pullBatch is the most messages the client buffers; one more may be in progress. AckWait
+	// counts down for each while it waits in the buffer, so all of them must be processable well
+	// within AckWait even when writes are slow: (10 + 1) × 2s = 22s < 30s.
+	pullBatch = 10
 )
 
 // defaultRetryDelays grow with each attempt; the last one repeats.
@@ -88,7 +92,8 @@ func NewHandler(js jetstream.JetStream, rec Recorder) *Handler {
 // context the shutdown can't cancel (each attempt keeps its own time limit).
 func Run(ctx context.Context, cons jetstream.Consumer, h *Handler) error {
 	workCtx := context.WithoutCancel(ctx)
-	cc, err := cons.Consume(func(msg jetstream.Msg) { h.Handle(workCtx, msg) })
+	cc, err := cons.Consume(func(msg jetstream.Msg) { h.Handle(workCtx, msg) },
+		jetstream.PullMaxMessages(pullBatch))
 	if err != nil {
 		return fmt.Errorf("start consuming: %w", err)
 	}

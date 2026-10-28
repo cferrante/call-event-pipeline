@@ -265,6 +265,13 @@ declined. Each fix was made test-first, with a deliberate break where a test cou
    the DLQ stream is really deleted before attempt 5 and recreated before attempt 6; before the
    fix there was no attempt 6. The spec's known limitation narrows to two failures in a row.
 
+3. **Fixed: the client buffered up to 500 messages but processed them one at a time.** `AckWait`
+   counts down while a message waits in the buffer, so with slow writes (e.g. 100 ms) buffered
+   messages would expire, be redelivered, use up retries, and could be dead-lettered with no
+   real error. The client now pulls 10 at a time. Test: with a 100-message backlog the client
+   held 100 unacked messages before the fix and at most 11 (10 buffered + 1 in progress) after.
+   Effect on throughput is measured in [benchmarks](benchmarks.md).
+
 Found while fixing these: **Go's test cache doesn't track the binaries the e2e tests build**, so
 `go test -tags integration ./...` reported a stale `ok` after `cmd/attribution` changed. The README
 now runs integration tests with `-count=1`.
