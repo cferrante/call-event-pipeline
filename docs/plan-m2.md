@@ -1,6 +1,6 @@
 # Plan: milestone 2 (M2)
 
-Status: **agreed** · Spec: [design.md](design.md) · Previous: [M1 plan](plan-m1.md)
+Status: **complete** · Spec: [design.md](design.md) · Previous: [M1 plan](plan-m1.md)
 
 M2 goal ([spec goal 4](design.md#1-goals)): isolate AI inference so that a webhook spike shows up
 as **queue lag**, not as slower or failing inference. Done when the spike test shows the model's

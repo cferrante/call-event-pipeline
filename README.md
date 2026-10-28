@@ -24,9 +24,10 @@ Go · NATS JetStream · PostgreSQL · k6 (load testing). Everything runs nativel
 
 ## Status
 
-Milestone 1 in progress: the services run end to end and pass the spike test (see
-[benchmarks](docs/benchmarks.md)); the conversation report and code review are next. See the [design spec](docs/design.md) for the architecture and decisions, and the
-[M1 plan](docs/plan-m1.md) for progress.
+Milestones 1 and 2 are complete: webhooks are ingested, attributed and classified by a (stub) AI
+model, and the spike test shows zero loss and flat model latency at 1,000 webhooks/s (see
+[benchmarks](docs/benchmarks.md)). See the [design spec](docs/design.md) for the architecture and
+decisions, and the [M1](docs/plan-m1.md) and [M2](docs/plan-m2.md) plans for how each was built.
 
 - **M1:** ingest edge, attribution consumer, dead-letter handling, spike test proving zero
   loss and zero duplicates

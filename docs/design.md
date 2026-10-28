@@ -1,6 +1,6 @@
 # Design spec: decoupled lead ingestion layer
 
-Status: **agreed; implementing milestone 1** · Stack: Go + NATS JetStream + Postgres (all native on Ubuntu/WSL2)
+Status: **agreed; milestones 1 and 2 implemented** · Stack: Go + NATS JetStream + Postgres (all native on Ubuntu/WSL2)
 
 New to the terms used here (stream, consumer, ack, …)? See the [concepts guide](concepts.md).
 
