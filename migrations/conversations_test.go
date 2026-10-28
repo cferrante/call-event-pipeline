@@ -128,6 +128,19 @@ func TestEachTrackingNumberIsItsOwnConversation(t *testing.T) {
 	wantReport(t, got, "radio", 1, 1)
 }
 
+// A tracking number can move to another campaign mid-conversation. Each campaign then gets
+// its own conversation, so no campaign shows interactions without a conversation.
+func TestCampaignChangeMidConversationCountsForEachCampaign(t *testing.T) {
+	db, lead, campaign := setupLead(t)
+	spring := "spring-flyer"
+	message(t, db, caller, googleNo, campaign, "google", lead, day0)
+	message(t, db, caller, googleNo, &spring, "print", lead, day0.Add(time.Hour))
+
+	got := report(t, db)
+	wantReport(t, got, "google", 1, 1)
+	wantReport(t, got, "print", 1, 1)
+}
+
 // Anonymous callers can't be told apart, so each of their messages counts on its own.
 func TestAnonymousMessagesAreSeparateConversations(t *testing.T) {
 	db, _, campaign := setupLead(t)
@@ -151,11 +164,12 @@ func TestConversationColumnsAreIndexed(t *testing.T) {
 	var n int
 	err := db.QueryRow(ctx(t), `
 		SELECT count(*) FROM pg_indexes
-		WHERE tablename = 'interactions' AND indexdef LIKE '%(from_number, to_e164, occurred_at)%'`).Scan(&n)
+		WHERE tablename = 'interactions'
+		  AND indexdef LIKE '%(from_number, to_e164, campaign_id, occurred_at)%'`).Scan(&n)
 	if err != nil {
 		t.Fatalf("query indexes: %v", err)
 	}
 	if n == 0 {
-		t.Error("no index on interactions(from_number, to_e164, occurred_at)")
+		t.Error("no index on interactions(from_number, to_e164, campaign_id, occurred_at)")
 	}
 }

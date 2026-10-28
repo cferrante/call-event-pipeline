@@ -278,6 +278,11 @@ declined. Each fix was made test-first, with a deliberate break where a test cou
    withheld caller ID (the interaction is kept and credited, with no lead). Test: two new cases
    that the old code got wrong.
 
+7. **Fixed: a tracking number moved to another campaign mid-conversation** gave the new campaign
+   interactions but no conversation. Conversations are now split by campaign as well. This is a
+   new migration, `0003`, because `0002` had already been applied to the dev database and
+   applied migrations are never edited. The conversation index was replaced to match.
+
 Found while fixing these: **Go's test cache doesn't track the binaries the e2e tests build**, so
 `go test -tags integration ./...` reported a stale `ok` after `cmd/attribution` changed. The README
 now runs integration tests with `-count=1`.
