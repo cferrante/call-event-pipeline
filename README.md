@@ -61,6 +61,7 @@ go run ./cmd/sendhook                 # a signed fake voice webhook → 200
 go run ./cmd/sendhook -channel sms    # an SMS
 go run ./cmd/sendhook -bad-signature  # → 403
 psql "$DATABASE_URL" -c 'SELECT provider_id, source, lead_id FROM interactions'
+psql "$DATABASE_URL" -c 'SELECT * FROM campaign_conversations'   # conversations per campaign
 ```
 
 Calls to numbers missing from `tracking_numbers` are attributed to `unknown`. Add one with

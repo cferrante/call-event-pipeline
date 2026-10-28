@@ -240,6 +240,10 @@ and you can start and stop NATS and Postgres yourself.
 - **Step 11: benchmark history lives in [`docs/benchmarks.md`](benchmarks.md)**, one row per
   notable run with the git commit and machine, since this plan becomes history after M1.
   `run.sh` prints a ready-to-paste row; it never edits tracked files itself.
+- **Step 12: the report is a database view, `campaign_conversations`** (migration `0002`), so
+  anyone can query it without copying SQL around. A conversation spans channels: a call and a
+  text to the same tracking number within 24 hours are one contact. Exactly 24 hours apart
+  still counts as the same conversation.
 
 ## Code-review outcomes
 

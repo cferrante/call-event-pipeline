@@ -206,7 +206,8 @@ interactions     (id PK, provider_id UNIQUE, lead_id FK NULL, channel, from_e164
 - `leads` holds precomputed first/last touch, a shortcut for the most common questions.
 - "Conversation" is a reporting concept, not a stored one: a query groups a caller's messages
   to the same tracking number, starting a new conversation after a 24h gap. Reports count
-  conversations, so a chatty SMS thread doesn't count as many leads.
+  conversations, so a chatty SMS thread doesn't count as many leads. It's the
+  `campaign_conversations` view (conversations and interactions per campaign).
 
 Migrations: plain numbered `.sql` files applied with `psql` (no migration tool to install).
 
