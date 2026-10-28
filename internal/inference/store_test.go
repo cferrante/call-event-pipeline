@@ -29,14 +29,14 @@ func sample(id string) Insight {
 		ProviderID:   id,
 		ReceivedAt:   received,
 		Result:       Result{Intent: "sales", Score: 0.9, ModelVersion: "stub-v1"},
-		ModelLatency: 213 * time.Millisecond,
+		ModelLatency: 213456 * time.Microsecond,
 	}
 }
 
 type insightRow struct {
 	Intent, ModelVersion string
 	Score                float64
-	ModelMS              int
+	ModelMS              float64
 	ReceivedAt           time.Time
 	Version              string // xmin: changes on every write
 }
@@ -63,6 +63,8 @@ func save(t *testing.T, s *Store, in Insight) bool {
 	return saved
 }
 
+// Model latency keeps sub-millisecond precision: at the load test's 10 ms, whole milliseconds
+// would make 1 ms of rounding as large as the 10% "flat" tolerance.
 func TestSaveStoresTheInsight(t *testing.T) {
 	db := dbtest.Migrated(t)
 	s := NewStore(db)
@@ -73,7 +75,7 @@ func TestSaveStoresTheInsight(t *testing.T) {
 
 	r := row(t, db, "CA1")
 	if r.Intent != "sales" || r.ModelVersion != "stub-v1" || r.Score < 0.89 || r.Score > 0.91 ||
-		r.ModelMS != 213 || !r.ReceivedAt.Equal(received) {
+		r.ModelMS < 213.455 || r.ModelMS > 213.457 || !r.ReceivedAt.Equal(received) {
 		t.Errorf("row = %+v", r)
 	}
 }

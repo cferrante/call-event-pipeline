@@ -33,7 +33,7 @@ func (s *Store) Save(ctx context.Context, in Insight) (bool, error) {
 		VALUES ($1, $2, $3, $4, $5, $6)
 		ON CONFLICT (provider_id) DO NOTHING`,
 		in.ProviderID, in.Result.Intent, in.Result.Score, in.Result.ModelVersion,
-		in.ModelLatency.Milliseconds(), in.ReceivedAt)
+		float64(in.ModelLatency)/float64(time.Millisecond), in.ReceivedAt)
 	if err != nil {
 		return false, fmt.Errorf("save insight %s: %w", in.ProviderID, err)
 	}

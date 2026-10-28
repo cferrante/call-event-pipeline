@@ -196,6 +196,10 @@ one decision (finding 1) made by you. Fixes were made test-first with deliberate
    the process output, if inference exits. A new test starts inference alone on a fresh database
    (the step 5 gap); skipping its migrations is now caught. Made in the same commit as finding 1,
    because the restructured bulkhead test needed it.
+2. **Fixed: model latency was stored in whole milliseconds**, so at the load test's 10 ms, 1 ms of
+   rounding was as large as the 10% "flat" tolerance. It's now fractional (migration `0005`), and
+   the spike test compares with decimals. Short runs: 4 workers, p95 11.71 ms idle vs 11.67 ms
+   spike (PASS); 200 workers, 11.80 vs 190.25 ms (FAIL, as it should).
 6. **Fixed: `INFERENCE_WORKERS` defaulted to 4 regardless of `MODEL_CAPACITY`.** It now follows the
    capacity unless set.
 9. **Fixed: workers and `MaxAckPending` were set separately for inference.** `consumer.Inference(n)`

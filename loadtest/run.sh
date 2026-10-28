@@ -161,16 +161,21 @@ window() { # window idle|spike -> "count model_p50 model_p95 tti_p50 tti_p95" (0
                   WHERE received_at >= t0 + make_interval(secs => $from)
                     AND received_at <  t0 + make_interval(secs => $to))
        SELECT count(*),
-              coalesce(round(percentile_cont(0.5)  WITHIN GROUP (ORDER BY model_ms)), 0),
-              coalesce(round(percentile_cont(0.95) WITHIN GROUP (ORDER BY model_ms)), 0),
+              coalesce(round(percentile_cont(0.5)  WITHIN GROUP (ORDER BY model_ms)::numeric, 2), 0),
+              coalesce(round(percentile_cont(0.95) WITHIN GROUP (ORDER BY model_ms)::numeric, 2), 0),
               coalesce(round(percentile_cont(0.5)  WITHIN GROUP (ORDER BY tti)), 0),
               coalesce(round(percentile_cont(0.95) WITHIN GROUP (ORDER BY tti)), 0)
        FROM w" | tr '|' ' '
 }
 read -r idle_n idle_m50 idle_m95 idle_t50 idle_t95 <<<"$(window idle)"
 read -r spike_n spike_m50 spike_m95 spike_t50 spike_t95 <<<"$(window spike)"
-flat() { (( spike_n > 0 && idle_n > 0 && spike_m95 * 10 <= idle_m95 * 11 )); } # within +10%
-overloaded() { (( timeouts > 0 || (idle_m95 > 0 && spike_m95 >= 2 * idle_m95) )); }
+# Model latency has fractional milliseconds, so compare with awk rather than bash integers.
+flat() { # spike p95 within +10% of idle p95
+  awk -v s="$spike_m95" -v i="$idle_m95" -v sn="$spike_n" -v idn="$idle_n" 'BEGIN { exit !(sn > 0 && idn > 0 && s <= i * 1.1) }'
+}
+overloaded() { # timeouts, or spike p95 at least 2x idle p95
+  awk -v s="$spike_m95" -v i="$idle_m95" -v t="$timeouts" 'BEGIN { exit !(t > 0 || (i > 0 && s >= 2 * i)) }'
+}
 
 failures=0
 check() { # check <description> <condition...>
