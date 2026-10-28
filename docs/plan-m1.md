@@ -141,12 +141,190 @@ and you can start and stop NATS and Postgres yourself.
 
 ## Deviations from the plan
 
-_None yet._
+- **Step 1: directories are created when a step first needs them**, not all up front. Git
+  doesn't track empty directories, so creating the whole layout now would mean committing
+  placeholder files.
+- **Step 1: the first test is `GET /healthz`**, not a throwaway test. It's real code the
+  ingest service needs (see the [ingest edge in the spec](design.md#51-ingest-edge-cmdingest)).
+- **Step 1: `INGEST_PORT` was added now instead of in step 10**, because port 8080 is already in
+  use on the dev machine. It defaults to 8080 and rejects invalid values at startup.
+- **Step 2: signatures are checked with and without the default port.** Twilio's docs say
+  voice-over-HTTPS URLs are signed without the port but SMS URLs keep it, so the URL we
+  rebuild may differ from the signed one by `:443`/`:80`. Twilio's own helper libraries do the
+  same. A different *non-default* port is still rejected.
+- **Step 3: "anonymous caller" is broader than the spec's `Anonymous`/blank.** Twilio sends a
+  word such as `anonymous` or `unknown` in `From`, and has also used keypad numbers for those
+  words (ANONYMOUS → `+266696687`). A caller is anonymous if `From` is blank, isn't an E.164
+  number, or is one of those keypad numbers (derived in code from the words).
+- **Step 3: `params` is stored as name → list of values** (Go's `url.Values`), not name →
+  string as sketched in the [spec's event schema](design.md#6-event-schema), so a replay
+  reproduces the exact form the signature was computed over.
+- **Step 3: `envelope.Parse` validates events read from the stream.** Its errors mark messages
+  that can never succeed, which step 8 sends to the dead-letter queue instead of retrying.
+- **Step 5 was done before step 4.** They're independent: step 4's handler uses a fake
+  publisher, and step 5 builds the real one.
+- **Step 5: integration tests start their own `nats-server`** (`internal/natstest`), using the
+  installed binary on a free port with a temporary data directory, and skip if it isn't
+  installed. Each test gets a clean JetStream, and you don't have to start NATS first.
+  Embedding the server as a Go library was rejected because it pulls the whole server into
+  the module's dependencies.
+- **Step 5: "publish twice → one message" is joined by "existing stream with an old config is
+  updated".** Creating an identical stream twice already succeeds in JetStream, so a plain
+  idempotence test couldn't tell a correct implementation from a wrong one.
+- **Step 4: the signed URL is built from a configured public base URL**, not from the request's
+  own host and scheme. Behind a tunnel or proxy the server sees e.g. `http://localhost:8081`
+  while Twilio signed `https://<public host>`, so every signature would fail.
+- **Step 4: two responses the spec didn't list.** A signed webhook that can't become an event
+  (e.g. no `CallSid`) gets 400, because a retry would fail the same way. Publishing has a
+  5-second deadline, well inside Twilio's 15-second timeout, so a stalled stream can't hold
+  requests open.
+- **Step 4: the handler returns whatever TwiML it's given.** Choosing it (e.g. `<Dial>` to a
+  forwarding number) moves to step 10 with the rest of the wiring, as does the
+  `TWILIO_AUTH_TOKEN` setup.
+- **Step 6: the app connects as a least-privilege `leads_app` role**, not the developer's
+  superuser login. `scripts/db-setup.sh` creates it and the `leads` database it owns. It has
+  `CREATEDB` so tests can create throwaway databases; a production role wouldn't.
+- **Step 6: `.env` / `.env.example` arrived now instead of step 10**, because `leads_app`'s
+  password lives in `DATABASE_URL`.
+- **Step 6: migrations run from Go (`internal/migrate`, `cmd/migrate`), not a `psql` script.**
+  The SQL files are embedded in the binary and recorded in `schema_migrations`, so the
+  migrator could be built test-first and runs anywhere without `psql`. An advisory lock lets
+  services start at the same time safely.
+- **Step 6: each integration test gets its own throwaway database** (`internal/dbtest`)
+  instead of a shared `leads_test`, for the same reasons as one NATS server per test.
+- **Step 6: `interactions.from_e164` is named `from_number`**, because for anonymous callers
+  it holds words like `anonymous`, which aren't E.164 numbers.
+- **Step 7: the interaction is inserted before the lead is touched**, reversing the spec's
+  original order, so a redelivered message is a complete no-op. See
+  [delivery guarantees](design.md#55-delivery-guarantees).
+- **Step 7: the tracking-number lookup is part of the interaction insert** (one SQL statement
+  with a `LEFT JOIN`), not a separate query. The insert needs the campaign anyway, and one
+  statement keeps the gate and the lookup in a single round trip.
+- **Step 8: no JetStream `BackOff`; retry delays come from `NakWithDelay`.** With `BackOff`
+  set, JetStream uses its first value (1s) instead of `AckWait`, so a write slower than 1s is
+  redelivered while still running. A test showed this against the real server (2 deliveries
+  of a 1.5s write); the spec's [JetStream table](design.md#52-jetstream-configuration) is
+  corrected.
+- **Step 8: the consumer logic lives in `internal/consumer`**, so it can be tested against a
+  real NATS server; `cmd/attribution` only wires it up (step 10).
+- **Step 8: each attempt is limited to 20s,** below the 30s `AckWait`, so a stuck attempt fails
+  and is retried by us instead of being redelivered while it's still running.
+- **Step 9: the worker dead-letters on the final attempt itself, instead of listening for
+  JetStream's max-deliveries advisory.** Advisories aren't stored, so any sent while the
+  service is down or restarting would be missed. The remaining gap (a crash *during* the final
+  attempt) is a known limitation in the
+  [spec](design.md#12-decisions-and-known-limitations), with the upgrade path.
+- **Step 10 is split into two commits:** 10a makes the ingest service runnable, 10b the
+  attribution service, the end-to-end test and the README.
+- **Step 10a: `cmd/sendhook`, a dev tool that sends correctly signed fake webhooks.** `curl`
+  can't conveniently compute Twilio's signature, and the click-through steps need one.
+- **Step 10a: `scripts/env-setup.sh` creates `.env` or adds variables it's missing**, turning
+  `change-me` placeholders into random secrets without touching existing values.
+  `db-setup.sh` previously only filled placeholders when creating `.env`, so an existing `.env`
+  would never have gained the new variables.
+- **Step 10a: optional `INGEST_FORWARD_TO`** chooses the voice TwiML (`<Dial>` or end the call),
+  and the HTTP server has read/write timeouts so stalled clients can't tie up connections
+  during a spike.
+- **Step 10b: the attribution service applies migrations at startup**, so a fresh database
+  needs no separate migrate step (`cmd/migrate` still exists for doing it by hand).
+- **Step 10b: end-to-end tests (`e2e/`) build and run the real binaries** against a throwaway
+  NATS server and database, which also covers the `main` wiring: config, startup migrations
+  and clean exit on Ctrl-C.
+- **Step 11: `loadtest/run.sh` runs the spike in isolation**: a fresh `leads_loadtest` database
+  and its own NATS server on separate ports, both removed afterwards, so about 70,000 test rows
+  never touch the dev database. It decides PASS/FAIL itself and exits non-zero on failure.
+- **Step 11: k6 uses an arrival-rate executor**, so load doesn't drop when the server slows
+  (no coordinated omission); see the [concepts guide](concepts.md#coordinated-omission).
+- **Step 11: `run.sh` reads NATS's JSON stats with a two-line `python3` snippet**, because `jq`
+  isn't installed and `grep` on JSON would be fragile. It's a test helper, not a service.
+- **Step 11: benchmark history lives in [`docs/benchmarks.md`](benchmarks.md)**, one row per
+  notable run with the git commit and machine, since this plan becomes history after M1.
+  `run.sh` prints a ready-to-paste row; it never edits tracked files itself.
+- **Step 12: the report is a database view, `campaign_conversations`** (migration `0002`), so
+  anyone can query it without copying SQL around. A conversation spans channels: a call and a
+  text to the same tracking number within 24 hours are one contact. Exactly 24 hours apart
+  still counts as the same conversation.
 
 ## Code-review outcomes
 
-_None yet._
+Step 13 ran `/code-review` (medium effort) on the whole M1 branch: 10 findings, 8 fixed and 2
+declined. Each fix was made test-first, with a deliberate break where a test could show it.
+
+1. **Fixed: on shutdown, buffered messages were processed with the cancelled shutdown context**,
+   so each failed and used up a retry; on a 5th attempt even the dead-letter write failed. `Run`
+   now stops fetching on shutdown but processes messages it already holds with a context the
+   shutdown can't cancel. Test: 29 of 30 buffered messages failed before the fix, 0 after.
+5. **Fixed (attribution): `defer nc.Drain()` didn't wait**, so the last acks could be lost at exit,
+   causing avoidable redeliveries. The service now waits until the connection has closed.
+   Ingest is unaffected, since its publishes already wait for their PubAck. Not covered by a test:
+   whether unsent acks are lost at exit depends on timing, so a test couldn't reliably show it.
+
+2. **Fixed: a failed dead-letter write on the final attempt stranded the message**, because
+   JetStream had no deliveries left to retry it. The consumer now allows one spare delivery
+   (`MaxDeliver` 6 for 5 attempts), which also covers a worker crashing during attempt 5. Test:
+   the DLQ stream is really deleted before attempt 5 and recreated before attempt 6; before the
+   fix there was no attempt 6. The spec's known limitation narrows to two failures in a row.
+
+3. **Fixed: the client buffered up to 500 messages but processed them one at a time.** `AckWait`
+   counts down while a message waits in the buffer, so with slow writes (e.g. 100 ms) buffered
+   messages would expire, be redelivered, use up retries, and could be dead-lettered with no
+   real error. The client now pulls 10 at a time. Test: with a 100-message backlog the client
+   held 100 unacked messages before the fix and at most 11 (10 buffered + 1 in progress) after.
+   Effect on throughput is measured in [benchmarks](benchmarks.md).
+
+6. **Fixed: `From` was checked as E.164 after adding a missing `+`, but stored without it**, so
+   `14158675310` and `+14158675310` could become two leads for one person, and SMS short codes
+   became leads. Only an E.164 `From` now identifies a lead; anything else is treated like a
+   withheld caller ID (the interaction is kept and credited, with no lead). Test: two new cases
+   that the old code got wrong.
+
+7. **Fixed: a tracking number moved to another campaign mid-conversation** gave the new campaign
+   interactions but no conversation. Conversations are now split by campaign as well. This is a
+   new migration, `0003`, because `0002` had already been applied to the dev database and
+   applied migrations are never edited. The conversation index was replaced to match.
+
+8. **Fixed: the spike test's duplicate check could false-FAIL.** A webhook can be stored yet
+   answered 503, if its 5s timeout fires as the PubAck arrives; that's a legitimate row but not
+   "accepted". k6 now also counts unique webhooks *sent*: loss is rows < accepted, a duplicate is
+   rows > sent. Verified with four short runs: normal (PASS), 5 stored-but-503 webhooks
+   simulated (now PASS; the old check failed), an extra row (FAIL), real loss (FAIL).
+
+10. **Fixed: small duplications.** sendhook now takes each channel's ID parameter from
+    `envelope.IDParam` instead of repeating the mapping, and computes its signed URL once, so the
+    `-bad-signature` path can't diverge from the normal one. The empty TwiML response is one
+    constant shared by SMS and unforwarded calls.
+
+**Declined:**
+
+4. **"The dead-letter publish has no timeout."** It does: nats.go wraps a context that has no
+   deadline in its default API timeout (`wrapContextWithoutDeadline`), so it can't run past
+   `AckWait`. Checked in the nats.go v1.54.0 source.
+9. **"Small config helpers are duplicated"** (default NATS URL, the `DATABASE_URL` guard, password
+   redaction): true, with two copies each. Following the rule of three, a shared helper is worth
+   it at the third copy, not the second; two short copies in separate `main` packages are
+   cheaper than a new shared package.
+
+Found while fixing these: **Go's test cache doesn't track the binaries the e2e tests build**, so
+`go test -tags integration ./...` reported a stale `ok` after `cmd/attribution` changed. The README
+now runs integration tests with `-count=1`.
 
 ## Results
 
-_Spike test results are recorded here in step 11._
+### Spike test
+
+Baseline at `2f7278d`, `./loadtest/run.sh` with the defaults (ramp to 1,000 req/s over 10s, hold
+60s, 5% deliberate duplicates). **PASS.** Details, the lag curve and later runs are in
+[benchmarks](benchmarks.md).
+
+| Target ([spec section 8](design.md#8-measuring-absorbing-spikes)) | Result | |
+|---|---|---|
+| Edge p99 latency < 50 ms at 1,000 req/s | p50 0.42 ms, **p99 1.03 ms**, max 8.9 ms | ✓ |
+| Edge error rate 0% | 0 of 70,945 requests failed | ✓ |
+| Consumer lag rises during the spike, returns to 0 | peaked at **22,675** messages, drained 27s after the spike | ✓ |
+| Loss: accepted = rows | 67,499 unique webhooks accepted, 67,499 interactions | ✓ |
+| Duplicates: replays add no rows | 3,446 duplicates sent, 0 extra rows | ✓ |
+| Dead letters | 0 | ✓ |
+
+The spike became lag, not errors or lost leads. The consumer handles roughly 625–750 messages/s
+one at a time; if draining ever needs to be faster, processing messages in parallel is the next
+lever, measured with the same script before and after.

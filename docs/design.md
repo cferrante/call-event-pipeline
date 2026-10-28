@@ -1,6 +1,8 @@
 # Design spec: decoupled lead ingestion layer
 
-Status: **draft for review** · Stack: Go + NATS JetStream + Postgres (all native on Ubuntu/WSL2)
+Status: **agreed; implementing milestone 1** · Stack: Go + NATS JetStream + Postgres (all native on Ubuntu/WSL2)
+
+New to the terms used here (stream, consumer, ack, …)? See the [concepts guide](concepts.md).
 
 ## 1. Goals
 
@@ -87,32 +89,37 @@ can slow the edge, because the stream sits between them.
 | Storage | File | Survives restarts |
 | Retention | Limits (max age 7d) | Lets new consumers (e.g. M2) replay history |
 | Duplicate window | 10 min | Covers provider retry bursts; DB constraint covers beyond |
-| Consumer `attribution` | Durable pull, `AckExplicit`, `AckWait 30s`, `MaxDeliver 5`, backoff 1s/5s/30s | Pull lets workers fetch only what they can handle |
+| Consumer `attribution` | Durable pull, `AckExplicit`, `AckWait 30s`, `MaxDeliver 6` (5 attempts + 1 spare), no `BackOff` | Pull lets workers fetch only what they can handle |
+| Client pull batch | 10 messages (`PullMaxMessages`) | `AckWait` counts down while a message waits in the client's buffer; a small batch can always be processed within it, even with slow writes |
+| Retry delays | `NakWithDelay` 1s, 5s, then 30s per attempt | JetStream's `BackOff` replaces `AckWait` with its first value, so a write slower than 1s would be redelivered while still running ([section 5.5](#55-delivery-guarantees)) |
+| Stream `LEADS_DLQ` | Subject `leads.dlq`, file storage, max age 30d | Messages that can never succeed, kept for a human to inspect |
 
 ### 5.3 Attribution consumer (`cmd/attribution`)
 
 - Fetches in batches, processes each message:
   - In one transaction:
-    1. Look up `To` in `tracking_numbers` → campaign/source/medium. No in-memory cache: it's a
+    1. Insert into `interactions` `ON CONFLICT (provider_id) DO NOTHING`. If no row was
+       inserted, this message was already processed: stop and change nothing else. This
+       insert is the idempotency gate; see [section 5.5](#55-delivery-guarantees).
+    2. Look up `To` in `tracking_numbers` → campaign/source/medium. No in-memory cache: it's a
        primary-key lookup inside a transaction we're already running, so it's always fresh.
-       Unknown number → `source = 'unknown'` (not an error).
-    2. Upsert the caller into `leads` by `From`, comparing `occurred_at` rather than processing
+       Unknown or inactive number → `source = 'unknown'` (not an error).
+    3. Upsert the caller into `leads` by `From`, comparing `occurred_at` rather than processing
        order: first-touch takes the earliest interaction, last-touch the latest. *Why:*
        redelivery and parallel workers mean a later call can be processed before an earlier one.
-       Withheld caller ID (`Anonymous`/blank) → skip the lead; the interaction gets
-       `lead_id = NULL`, so the campaign still gets credit.
-    3. Insert into `interactions` `ON CONFLICT (provider_id) DO NOTHING`.
+       Withheld caller ID → skip the lead; the interaction keeps `lead_id = NULL`, so the
+       campaign still gets credit. Otherwise set the interaction's `lead_id`.
   - Commit → `Ack`.
   - A cache is added only if the spike test ([section 8](#8-measuring-absorbing-spikes)) shows
     the lookup is a bottleneck.
 - Error handling:
   - **Transient** (DB down, timeout) → `Nak` with delay; JetStream redelivers.
   - **Permanent** (unparseable envelope) → publish to `leads.dlq`, then `Term`.
-  - **Retries exhausted** (`MaxDeliver`) → copied to `leads.dlq` by listening to the JetStream
-    max-deliveries advisory.
-- *Why idempotent writes as well as stream dedupe:* the stream dedupes within its window, but
-  a message can still be redelivered after a crash between commit and ack. The unique
-  constraint makes reprocessing harmless.
+  - **Retries exhausted** → when attempt 5 (or later) fails, the worker publishes to
+    `leads.dlq` itself, then `Term`. It doesn't rely on JetStream's max-deliveries advisory,
+    which is an unstored message lost if no listener is running at that moment. The consumer
+    allows one spare delivery (`MaxDeliver` 6), so if that dead-letter write fails, or the
+    worker crashes during attempt 5, the message is delivered once more and dead-lettered then.
 
 ### 5.4 Inference consumer (M2, sketch only)
 
@@ -121,6 +128,50 @@ can slow the edge, because the stream sits between them.
   more in-flight work than the model can serve.
 - Priority: first-touch leads before re-analysis (likely two consumers with different pools).
 - The model is a stub with configurable latency/error rate.
+
+### 5.5 Delivery guarantees
+
+JetStream delivers each message **at least once**: never lost, occasionally more than once.
+Consumers must therefore make a repeat delivery harmless.
+
+**Why repeats happen.** A consumer commits to Postgres, then acks to JetStream. Those are two
+systems, and nothing makes them succeed or fail together, so there is always a gap:
+
+- The worker crashes after the commit but before the ack.
+- The ack is lost on the network.
+- Processing takes longer than `AckWait` (30s), e.g. while Postgres struggles during a spike.
+  JetStream assumes the worker died and redelivers **while the first worker is still running**,
+  so two workers can process the same message at the same time.
+
+In each case JetStream redelivers a message whose effects are already in the database.
+
+**Why not ack before writing.** That only moves the gap: a crash after the ack loses the lead
+for good (at-most-once). A duplicate we can detect is better than a loss we can't, so we keep
+commit-then-ack and make processing **idempotent**: running it twice has the same effect as
+running it once ("effectively once"). True exactly-once delivery across two independent
+systems isn't achievable in general.
+
+**Two sources of duplicates, two guards.**
+
+| Where | Cause | Guard |
+|---|---|---|
+| Into the stream | The provider retries a webhook | JetStream's `Nats-Msg-Id` duplicate window ([section 5.2](#52-jetstream-configuration)) |
+| Out of the stream | Redelivery to a consumer | Idempotent writes in Postgres (below) |
+
+The stream's window also expires (10 minutes), so the database is the final guard for both.
+
+**The interaction insert is the gate.** Each consumer transaction starts with
+`INSERT INTO interactions … ON CONFLICT (provider_id) DO NOTHING RETURNING id`:
+
+- A row comes back → first delivery → go on to update the lead.
+- No row → already processed → change nothing else.
+
+Doing this *first* means a repeat delivery is a complete no-op. Updating the lead first would
+re-apply its changes. That is harmless today, because re-applying the same timestamps changes
+nothing, but only by coincidence: a later change such as a touch counter would silently
+over-count. It also covers concurrent duplicates: if two workers insert the same
+`provider_id` at once, Postgres makes the second wait for the first to commit, then its
+`DO NOTHING` applies, so exactly one worker updates the lead.
 
 ## 6. Event schema
 
@@ -158,7 +209,8 @@ interactions     (id PK, provider_id UNIQUE, lead_id FK NULL, channel, from_e164
 - `leads` holds precomputed first/last touch, a shortcut for the most common questions.
 - "Conversation" is a reporting concept, not a stored one: a query groups a caller's messages
   to the same tracking number, starting a new conversation after a 24h gap. Reports count
-  conversations, so a chatty SMS thread doesn't count as many leads.
+  conversations, so a chatty SMS thread doesn't count as many leads. It's the
+  `campaign_conversations` view (conversations and interactions per campaign).
 
 Migrations: plain numbered `.sql` files applied with `psql` (no migration tool to install).
 
@@ -224,3 +276,8 @@ Known limitations (deliberately out of M1):
   interaction stores its campaign at write time.
 - **Replies to our own outreach** look like inbound contacts until outbound calls/SMS are
   ingested.
+- **Two failures in a row at the end of a message's retries** (e.g. the dead-letter write fails
+  on attempt 5 *and* on the spare delivery, or a worker crashes during both) leave the message
+  undelivered but out of the DLQ. It isn't lost (it stays in `LEADS` for 7 days) and consumer
+  metrics show it. The upgrade path is to capture JetStream's max-deliveries advisories in
+  their own stream and dead-letter from there.
