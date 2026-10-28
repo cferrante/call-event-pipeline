@@ -80,7 +80,7 @@ On branch `docs/plan-m2`; merged before any code.
 
 ### Step 1: Update the spec
 
-Replace the spec's [inference sketch](design.md#54-inference-consumer-m2-sketch-only) with the
+Replace the spec's [inference sketch](design.md#54-inference-consumer-cmdinference) with the
 agreed design (D1–D5), add the `insights` table to the data model, and refine the inference
 targets in [section 8](design.md#8-measuring-absorbing-spikes).
 - Commit: *Specify the inference consumer*.

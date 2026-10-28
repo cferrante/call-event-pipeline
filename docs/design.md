@@ -121,13 +121,36 @@ can slow the edge, because the stream sits between them.
     allows one spare delivery (`MaxDeliver` 6), so if that dead-letter write fails, or the
     worker crashes during attempt 5, the message is delivered once more and dead-lettered then.
 
-### 5.4 Inference consumer (M2, sketch only)
+### 5.4 Inference consumer (`cmd/inference`)
 
-- Separate durable consumer `inference` on the same stream, with its own pace.
-- A fixed worker pool (e.g. N = model capacity) and `MaxAckPending` = N, so it never holds
-  more in-flight work than the model can serve.
-- Priority: first-touch leads before re-analysis (likely two consumers with different pools).
-- The model is a stub with configurable latency/error rate.
+Added in milestone 2 ([plan](plan-m2.md)). Its job is to keep AI inference at normal speed during
+a webhook spike, letting work wait in the stream instead.
+
+- **The model** is a stub in M2 (`internal/inference`); a real one can replace it behind the
+  same `Model` interface. It classifies each interaction's intent (`sales`, `support` or
+  `unknown`) with a score, from the SMS body, using fixed keyword rules.
+- **The stub behaves like a real inference server under load.** It has a **capacity** of 4
+  concurrent calls and a **base latency** of 200 ms (±10% jitter). A call that starts while
+  *k* calls are in flight (itself included) takes `base × max(1, k / capacity)`: beyond
+  capacity, calls share the model and each gets slower. If that would exceed the **timeout**
+  (2 s), the call waits the timeout and fails as overloaded. Without this, *any* consumer would
+  show flat latency and M2's experiment would prove nothing.
+- **A separate durable consumer, `inference`**, on the `LEADS` stream, with its own progress, so
+  a slow model never holds back attribution, and vice versa (the bulkhead pattern).
+- **A worker pool of N = 4 workers**, matching the model's capacity, and the consumer's
+  **`MaxAckPending` = 4**, which JetStream enforces on the server however many inference
+  processes run. During a spike, messages wait in the stream (lag), not inside the model.
+- **Idempotent like attribution:** results go to `insights` with a unique `provider_id`. Before
+  calling the model, a worker skips messages whose insight already exists, so redeliveries
+  don't spend model capacity; the unique constraint catches the rare race.
+- **Independent of attribution:** an insight can be stored before its interaction is, because
+  the two consumers run at their own pace. So `insights` has no foreign key to `interactions`;
+  they join on `provider_id`.
+- **Errors** follow [section 5.3](#53-attribution-consumer-cmdattribution): overload and database
+  errors are retried with delays; unparseable messages and exhausted retries go to the DLQ,
+  marked with a `Dlq-Consumer` header since both consumers share it.
+- **Priority lanes** (first-touch leads before repeat contacts) are deferred to M3, where
+  publishing "first touch" events safely needs the transactional outbox pattern.
 
 ### 5.5 Delivery guarantees
 
@@ -199,14 +222,19 @@ attribution bug) can reprocess history without asking the provider again.
 tracking_numbers (phone_e164 PK, campaign_id, source, medium, active)
 leads            (id PK, phone_e164 UNIQUE, first_campaign_id, first_source, first_seen_at,
                   last_campaign_id, last_source, last_seen_at)
-interactions     (id PK, provider_id UNIQUE, lead_id FK NULL, channel, from_e164, to_e164,
+interactions     (id PK, provider_id UNIQUE, lead_id FK NULL, channel, from_number, to_e164,
                   campaign_id, source, occurred_at, ingested_at, raw JSONB)
+insights         (id PK, provider_id UNIQUE, intent, score, model_version, model_ms,
+                  received_at, created_at)                                    -- M2
 ```
 
 - `interactions` is the record of facts: one row per inbound call/SMS, with the campaign
   current *at the time*, never rewritten. Any attribution model (multi-touch included) can be
   derived from it with SQL.
 - `leads` holds precomputed first/last touch, a shortcut for the most common questions.
+- `insights` holds one AI result per interaction (M2). `model_ms` is model latency;
+  `created_at − received_at` is time to insight. No foreign key to `interactions`, because the
+  inference consumer may store an insight before attribution stores its interaction.
 - "Conversation" is a reporting concept, not a stored one: a query groups a caller's messages
   to the same tracking number, starting a new conversation after a 24h gap. Reports count
   conversations, so a chatty SMS thread doesn't count as many leads. It's the
@@ -223,7 +251,10 @@ Migrations: plain numbered `.sql` files applied with `psql` (no migration tool t
 | Consumer lag (`num_pending`) | NATS monitoring `:8222/jsz` | Rises during spike, returns to 0 after |
 | Loss | k6 accepted count vs `interactions` rows | Equal |
 | Duplicates | k6 replays ~5% of requests | No extra rows |
-| Inference p95 (M2) | stub worker timings | Flat (±10%) between idle and spike |
+| Model latency p95 (M2) | `insights.model_ms` | Flat (±10%) between idle and spike |
+| Time to insight p95 (M2) | `insights.created_at − received_at` | Rises during spike, recovers after |
+| Inference loss/duplicates (M2) | `insights` rows vs accepted webhooks | Same checks as `interactions` |
+| Control run (M2) | same spike, worker limit removed | Model visibly overloaded: latency up, timeouts |
 
 Uses the monitoring endpoint built into NATS and the k6 summary, so no Prometheus/Grafana
 install is needed.
