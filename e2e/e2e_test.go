@@ -33,7 +33,7 @@ import (
 
 const authToken = "e2e-token"
 
-var ingestBin, attributionBin string
+var ingestBin, attributionBin, inferenceBin string
 
 // TestMain builds both services once for all tests.
 func TestMain(m *testing.M) {
@@ -44,7 +44,10 @@ func TestMain(m *testing.M) {
 	}
 	ingestBin = filepath.Join(dir, "ingest")
 	attributionBin = filepath.Join(dir, "attribution")
-	for bin, pkg := range map[string]string{ingestBin: "../cmd/ingest", attributionBin: "../cmd/attribution"} {
+	inferenceBin = filepath.Join(dir, "inference")
+	for bin, pkg := range map[string]string{
+		ingestBin: "../cmd/ingest", attributionBin: "../cmd/attribution", inferenceBin: "../cmd/inference",
+	} {
 		if out, err := exec.Command("go", "build", "-o", bin, pkg).CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "build %s: %v\n%s", pkg, err, out)
 			os.Exit(1)
@@ -161,19 +164,41 @@ func (e env) startAttribution(t *testing.T) *process {
 	return p
 }
 
+// startInference runs the inference service with a fast model, so tests don't wait on it.
+func (e env) startInference(t *testing.T) *process {
+	t.Helper()
+	p := start(t, "inference", inferenceBin,
+		"DATABASE_URL="+e.dbURL, "NATS_URL="+e.natsURL, "MODEL_LATENCY=10ms")
+	eventually(t, "inference to apply migrations", func() bool {
+		return e.count(t, "SELECT count(*) FROM pg_tables WHERE tablename = 'insights'") == 1
+	})
+	return p
+}
+
 // sendCall posts a voice webhook signed as Twilio would sign it, returning the status code.
 func (e env) sendCall(t *testing.T, callSid, from, to string) int {
 	t.Helper()
-	form := url.Values{"CallSid": {callSid}, "From": {from}, "To": {to}}
-	req, err := http.NewRequest(http.MethodPost, e.publicURL()+"/webhooks/voice", strings.NewReader(form.Encode()))
+	return e.send(t, "voice", url.Values{"CallSid": {callSid}, "From": {from}, "To": {to}})
+}
+
+// sendSMS posts a signed SMS webhook, returning the status code.
+func (e env) sendSMS(t *testing.T, messageSid, from, to, body string) int {
+	t.Helper()
+	return e.send(t, "sms", url.Values{"MessageSid": {messageSid}, "From": {from}, "To": {to}, "Body": {body}})
+}
+
+func (e env) send(t *testing.T, channel string, form url.Values) int {
+	t.Helper()
+	target := e.publicURL() + "/webhooks/" + channel
+	req, err := http.NewRequest(http.MethodPost, target, strings.NewReader(form.Encode()))
 	if err != nil {
 		t.Fatalf("new request: %v", err)
 	}
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("X-Twilio-Signature", twilio.Signature(authToken, e.publicURL()+"/webhooks/voice", form))
+	req.Header.Set("X-Twilio-Signature", twilio.Signature(authToken, target, form))
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
-		t.Fatalf("send %s: %v", callSid, err)
+		t.Fatalf("send %s webhook: %v", channel, err)
 	}
 	resp.Body.Close()
 	return resp.StatusCode
@@ -256,5 +281,57 @@ func TestWebhooksAcceptedWhileAttributionIsDownAreProcessedLater(t *testing.T) {
 	})
 
 	ingest.stop(t)
+	attribution.stop(t)
+}
+
+func TestSMSWebhookProducesInteractionAndInsight(t *testing.T) {
+	e := setup(t)
+	attribution := e.startAttribution(t)
+	inference := e.startInference(t)
+	ingest := e.startIngest(t)
+
+	if code := e.sendSMS(t, "SMe2e1", "+14158675310", "+18005550001", "What's the price for two?"); code != http.StatusOK {
+		t.Fatalf("webhook status = %d, want 200", code)
+	}
+
+	eventually(t, "the insight", func() bool {
+		return e.count(t, "SELECT count(*) FROM insights WHERE provider_id = 'SMe2e1' AND intent = 'sales'") == 1
+	})
+	eventually(t, "the interaction", func() bool {
+		return e.count(t, "SELECT count(*) FROM interactions WHERE provider_id = 'SMe2e1'") == 1
+	})
+
+	ingest.stop(t)
+	inference.stop(t)
+	attribution.stop(t)
+}
+
+// Bulkhead: with inference down, webhooks are still accepted and attributed; inference works
+// through its backlog once it starts.
+func TestInferenceDownDoesNotAffectIngestOrAttribution(t *testing.T) {
+	e := setup(t)
+	attribution := e.startAttribution(t)
+	ingest := e.startIngest(t)
+
+	const n = 10
+	for i := range n {
+		if code := e.sendCall(t, fmt.Sprintf("CAbulk%02d", i), "+14158675310", "+18005550001"); code != http.StatusOK {
+			t.Fatalf("webhook %d status = %d, want 200 while inference is down", i, code)
+		}
+	}
+	eventually(t, "attribution to record every call", func() bool {
+		return e.count(t, "SELECT count(*) FROM interactions") == n
+	})
+	if got := e.count(t, "SELECT count(*) FROM insights"); got != 0 {
+		t.Fatalf("insights = %d before inference started, want 0", got)
+	}
+
+	inference := e.startInference(t)
+	eventually(t, "inference to work through its backlog", func() bool {
+		return e.count(t, "SELECT count(*) FROM insights") == n
+	})
+
+	ingest.stop(t)
+	inference.stop(t)
 	attribution.stop(t)
 }

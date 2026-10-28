@@ -49,7 +49,8 @@ in each terminal first)
 ```bash
 nats-server -js -sd ./data/nats -m 8222   # 1. message broker, data kept in ./data
 go run ./cmd/attribution                  # 2. applies migrations, then consumes events
-go run ./cmd/ingest                       # 3. webhook endpoint on $INGEST_PORT
+go run ./cmd/inference                    # 3. classifies events with the (stub) AI model
+go run ./cmd/ingest                       # 4. webhook endpoint on $INGEST_PORT
 ```
 
 Stop any of them with Ctrl-C; each finishes in-flight work first.
@@ -62,6 +63,8 @@ go run ./cmd/sendhook -channel sms    # an SMS
 go run ./cmd/sendhook -bad-signature  # → 403
 psql "$DATABASE_URL" -c 'SELECT provider_id, source, lead_id FROM interactions'
 psql "$DATABASE_URL" -c 'SELECT * FROM campaign_conversations'   # conversations per campaign
+go run ./cmd/sendhook -channel sms -body "what's the price?"      # an SMS the model classifies as sales
+psql "$DATABASE_URL" -c 'SELECT provider_id, intent, score, model_ms FROM insights'
 ```
 
 Calls to numbers missing from `tracking_numbers` are attributed to `unknown`. Add one with
