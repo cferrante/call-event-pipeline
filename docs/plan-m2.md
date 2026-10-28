@@ -157,6 +157,19 @@ dual write and transactional outbox were added with this plan.)
 - **Step 5: shared settings moved to `internal/env`** (default NATS URL, the required
   `DATABASE_URL` check, password redaction). The inference service would have been the third
   copy of each; M1 declined this extraction (code-review finding 9) until a third copy appeared.
+- **Step 6: the spike test uses a faster model profile: 10 ms latency, 200 ms timeout.** With the
+  service defaults (200 ms, 2 s) the model handles about 20 messages/s, so a 70-second spike at
+  1,000/s would take nearly an hour to drain. The profile is 20× faster with the same ratios
+  (capacity 4, timeout = 20 × latency): about 400/s, still well below the spike, so a backlog
+  still builds. The service defaults are unchanged.
+- **Step 6: k6 starts with an idle period** (20/s for 20 s) as the baseline for "model latency
+  flat between idle and spike".
+- **Step 6: `MODE=control` judges the opposite outcome.** With 200 workers the model is
+  expected to overload, so its check is "overload was visible" (timeouts, or spike p95 at least
+  2× idle); losing work there is the point, so its inference loss and dead letters are reported,
+  not judged. Short runs proved each check: normal checks with 200 workers fail on flatness
+  (p95 11 → 190 ms, ~1,500 timeouts); control with 4 workers fails on "overloaded"; stopping
+  inference fails the insight-loss and drain checks.
 
 ## Code-review outcomes
 

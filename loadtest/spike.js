@@ -12,6 +12,8 @@ const TOKEN = __ENV.TOKEN;           // the service's TWILIO_AUTH_TOKEN
 const RATE = Number(__ENV.RATE || 1000);
 const RAMP = __ENV.RAMP || '10s';
 const HOLD = __ENV.HOLD || '60s';
+const IDLE = __ENV.IDLE || '0s'; // a gentle period before the spike, as a baseline
+const IDLE_RATE = Number(__ENV.IDLE_RATE || 0);
 const DUP_RATE = Number(__ENV.DUP_RATE || 0.05);
 const SUMMARY_FILE = __ENV.SUMMARY_FILE || 'summary.env';
 
@@ -21,11 +23,12 @@ export const options = {
   scenarios: {
     spike: {
       executor: 'ramping-arrival-rate',
-      startRate: 0,
+      startRate: IDLE !== '0s' ? IDLE_RATE : 0,
       timeUnit: '1s',
       preAllocatedVUs: 200,
       maxVUs: 2000,
       stages: [
+        ...(IDLE !== '0s' ? [{ target: IDLE_RATE, duration: IDLE }] : []),
         { target: RATE, duration: RAMP },
         { target: RATE, duration: HOLD },
         { target: 0, duration: '5s' },

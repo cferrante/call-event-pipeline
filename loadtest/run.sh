@@ -1,21 +1,35 @@
 #!/usr/bin/env bash
 # Spike test, fully isolated from your dev data: a fresh leads_loadtest database and a separate
-# NATS server (own ports, temporary storage). Starts both services, runs loadtest/spike.js,
-# waits for the backlog to drain, then checks nothing was lost or duplicated.
+# NATS server (own ports, temporary storage). Starts ingest, attribution and inference, runs
+# loadtest/spike.js (an idle period, then a spike), waits for both consumers to drain, then
+# checks nothing was lost or duplicated and that the model's latency stayed flat.
 #
-# Usage: ./loadtest/run.sh            (defaults: RATE=1000 req/s, RAMP=10s, HOLD=60s)
+# Usage: ./loadtest/run.sh                  normal: inference limited to the model's capacity
+#        MODE=control ./loadtest/run.sh     control: the limit removed, so the model overloads
 #        RATE=200 HOLD=10s ./loadtest/run.sh
-# Exits non-zero if any check fails. Results go to loadtest/results/<timestamp>/.
+# Durations are whole seconds ("10s"). Exits non-zero if any check fails. Results go to
+# loadtest/results/<timestamp>/.
 set -euo pipefail
 cd "$(dirname "$0")/.."
 set -a; source .env; set +a
 
+MODE=${MODE:-normal}
 RATE=${RATE:-1000} RAMP=${RAMP:-10s} HOLD=${HOLD:-60s} DUP_RATE=${DUP_RATE:-0.05}
-DRAIN_TIMEOUT=${DRAIN_TIMEOUT:-600}
+IDLE=${IDLE:-20s} IDLE_RATE=${IDLE_RATE:-20}
+# The load-test model profile: 20× faster than the service default (200ms, 2s) with the same
+# ratios, so ~400 messages/s fit through 4 workers and a run drains in minutes, not an hour.
+MODEL_LATENCY=${MODEL_LATENCY:-10ms} MODEL_TIMEOUT=${MODEL_TIMEOUT:-200ms} MODEL_CAPACITY=${MODEL_CAPACITY:-4}
+case "$MODE" in
+  normal) INFERENCE_WORKERS=${INFERENCE_WORKERS:-$MODEL_CAPACITY}; DRAIN_TIMEOUT=${DRAIN_TIMEOUT:-600} ;;
+  control) INFERENCE_WORKERS=${INFERENCE_WORKERS:-200}; DRAIN_TIMEOUT=${DRAIN_TIMEOUT:-900} ;;
+  *) echo "MODE must be normal or control, got ${MODE}"; exit 1 ;;
+esac
+secs() { echo "${1%s}"; } # "10s" -> 10
 NATS_PORT=4322 MON_PORT=8322 INGEST_PORT=8091
 DB_NAME=leads_loadtest
 DB_URL="${DATABASE_URL%/*}/${DB_NAME}"
-RESULTS="loadtest/results/$(date +%Y%m%d-%H%M%S)"
+NATS_URL_LT="nats://127.0.0.1:${NATS_PORT}"
+RESULTS="loadtest/results/$(date +%Y%m%d-%H%M%S)-${MODE}"
 WORK=$(mktemp -d)
 mkdir -p "$RESULTS"
 pids=()
@@ -36,17 +50,19 @@ wait_for() { # wait_for <description> <command...>
   log "timed out waiting for $what"; exit 1
 }
 sql() { psql -X -A -t "$DB_URL" -c "$1"; }
-# Reads one number from the NATS monitoring endpoint (python3 because jq isn't installed).
-nats_stat() { # nats_stat consumer_pending|consumer_ack_pending|dlq_messages
+# Prints "attribution_pending attribution_ack_pending inference_pending inference_ack_pending
+# dead_letters" from the NATS monitoring endpoint, in one call (python3: jq isn't installed).
+nats_stats() {
   curl -s "http://127.0.0.1:${MON_PORT}/jsz?streams=true&consumers=true" | python3 -c '
 import json, sys
-which = sys.argv[1]
 streams = {s["name"]: s for a in json.load(sys.stdin).get("account_details", []) for s in a.get("stream_detail", [])}
-if which == "dlq_messages":
-    print(streams.get("LEADS_DLQ", {}).get("state", {}).get("messages", 0)); sys.exit()
 consumers = {c["name"]: c for c in streams.get("LEADS", {}).get("consumer_detail", [])}
-c = consumers.get("attribution", {})
-print(c.get("num_pending" if which == "consumer_pending" else "num_ack_pending", 0))' "$1"
+out = []
+for name in ("attribution", "inference"):
+    c = consumers.get(name, {})
+    out += [c.get("num_pending", 0), c.get("num_ack_pending", 0)]
+out.append(streams.get("LEADS_DLQ", {}).get("state", {}).get("messages", 0))
+print(*out)'
 }
 
 for port in $NATS_PORT $MON_PORT $INGEST_PORT; do
@@ -54,8 +70,7 @@ for port in $NATS_PORT $MON_PORT $INGEST_PORT; do
 done
 
 log "building services"
-go build -o "$WORK/ingest" ./cmd/ingest
-go build -o "$WORK/attribution" ./cmd/attribution
+for svc in ingest attribution inference; do go build -o "$WORK/$svc" "./cmd/$svc"; done
 
 log "creating database ${DB_NAME}"
 psql -X -q "$DATABASE_URL" -c "DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)" -c "CREATE DATABASE ${DB_NAME}"
@@ -66,82 +81,134 @@ pids+=($!)
 wait_for "NATS" curl -sf "http://127.0.0.1:${MON_PORT}/healthz"
 
 log "starting attribution"
-DATABASE_URL="$DB_URL" NATS_URL="nats://127.0.0.1:${NATS_PORT}" "$WORK/attribution" >"$RESULTS/attribution.log" 2>&1 &
+DATABASE_URL="$DB_URL" NATS_URL="$NATS_URL_LT" "$WORK/attribution" >"$RESULTS/attribution.log" 2>&1 &
 pids+=($!)
-wait_for "migrations" bash -c "[ \"\$(psql -X -A -t '$DB_URL' -c \"SELECT count(*) FROM pg_tables WHERE tablename = 'interactions'\")\" = 1 ]"
+wait_for "migrations" bash -c "[ \"\$(psql -X -A -t '$DB_URL' -c \"SELECT count(*) FROM pg_tables WHERE tablename = 'insights'\")\" = 1 ]"
 sql "INSERT INTO tracking_numbers (phone_e164, campaign_id, source) VALUES
        ('+18005550001', 'search-fall', 'google'),
        ('+18005550002', 'morning-show', 'radio'),
        ('+18005550003', 'spring-flyer', 'print')" >/dev/null
 
+log "starting inference: ${INFERENCE_WORKERS} workers; model capacity ${MODEL_CAPACITY}, ${MODEL_LATENCY}, timeout ${MODEL_TIMEOUT}"
+DATABASE_URL="$DB_URL" NATS_URL="$NATS_URL_LT" INFERENCE_WORKERS=$INFERENCE_WORKERS \
+  MODEL_CAPACITY=$MODEL_CAPACITY MODEL_LATENCY=$MODEL_LATENCY MODEL_TIMEOUT=$MODEL_TIMEOUT \
+  "$WORK/inference" >"$RESULTS/inference.log" 2>&1 &
+pids+=($!)
+
 TOKEN=$(openssl rand -hex 16)
 PUBLIC_URL="http://127.0.0.1:${INGEST_PORT}"
 log "starting ingest on ${INGEST_PORT}"
-INGEST_PORT=$INGEST_PORT INGEST_PUBLIC_URL=$PUBLIC_URL TWILIO_AUTH_TOKEN=$TOKEN NATS_URL="nats://127.0.0.1:${NATS_PORT}" \
+INGEST_PORT=$INGEST_PORT INGEST_PUBLIC_URL=$PUBLIC_URL TWILIO_AUTH_TOKEN=$TOKEN NATS_URL="$NATS_URL_LT" \
   "$WORK/ingest" >"$RESULTS/ingest.log" 2>&1 &
 pids+=($!)
 wait_for "ingest" curl -sf "${PUBLIC_URL}/healthz"
 
 log "sampling consumer lag every second into lag.csv"
 (
-  echo "elapsed_s,num_pending,num_ack_pending"
+  echo "elapsed_s,attribution_pending,inference_pending"
   start=$(date +%s)
   while true; do
-    echo "$(( $(date +%s) - start )),$(nats_stat consumer_pending),$(nats_stat consumer_ack_pending)"
+    read -r ap _ ip _ _ <<<"$(nats_stats)"
+    echo "$(( $(date +%s) - start )),${ap},${ip}"
     sleep 1
   done
 ) >"$RESULTS/lag.csv" &
 sampler=$!
 
-log "running k6: ramp to ${RATE} req/s over ${RAMP}, hold ${HOLD}, ${DUP_RATE} duplicates"
+log "running k6: idle ${IDLE_RATE}/s for ${IDLE}, ramp to ${RATE}/s over ${RAMP}, hold ${HOLD}, ${DUP_RATE} duplicates"
 k6_status=0
 k6 run --quiet -e TARGET="$PUBLIC_URL" -e PUBLIC_URL="$PUBLIC_URL" -e TOKEN="$TOKEN" \
   -e RATE="$RATE" -e RAMP="$RAMP" -e HOLD="$HOLD" -e DUP_RATE="$DUP_RATE" \
+  -e IDLE="$IDLE" -e IDLE_RATE="$IDLE_RATE" \
   -e SUMMARY_FILE="$RESULTS/summary.env" loadtest/spike.js || k6_status=$?
 source "$RESULTS/summary.env"
 
-log "k6 finished; waiting for the backlog to drain (up to ${DRAIN_TIMEOUT}s)"
-drain_start=$(date +%s)
+log "k6 finished; waiting for both consumers to drain (up to ${DRAIN_TIMEOUT}s)"
+drain_start=$(date +%s) attribution_drain_s=""
 while :; do
-  rows=$(sql "SELECT count(*) FROM interactions")
-  if [ "$(nats_stat consumer_pending)" = 0 ] && [ "$(nats_stat consumer_ack_pending)" = 0 ] && [ "$rows" -ge "$UNIQUE_ACCEPTED" ]; then
-    break
-  fi
-  if (( $(date +%s) - drain_start > DRAIN_TIMEOUT )); then log "drain timed out"; break; fi
+  read -r ap aap ip iap _ <<<"$(nats_stats)"
+  elapsed=$(( $(date +%s) - drain_start ))
+  if [ -z "$attribution_drain_s" ] && [ "$ap" = 0 ] && [ "$aap" = 0 ]; then attribution_drain_s=$elapsed; fi
+  if [ -n "$attribution_drain_s" ] && [ "$ip" = 0 ] && [ "$iap" = 0 ]; then break; fi
+  if (( elapsed > DRAIN_TIMEOUT )); then log "drain timed out"; break; fi
   sleep 1
 done
-drain_s=$(( $(date +%s) - drain_start ))
+inference_drain_s=$(( $(date +%s) - drain_start ))
+attribution_drain_s=${attribution_drain_s:-timeout}
 sleep 2 # let the sampler record the drained state
 kill "$sampler" 2>/dev/null || true
 
 rows=$(sql "SELECT count(*) FROM interactions")
+insights=$(sql "SELECT count(*) FROM insights")
 leads=$(sql "SELECT count(*) FROM leads")
 unknown=$(sql "SELECT count(*) FROM interactions WHERE source = 'unknown'")
-dlq=$(nats_stat dlq_messages)
+read -r ap _ ip _ dlq <<<"$(nats_stats)"
 max_lag=$(tail -n +2 "$RESULTS/lag.csv" | cut -d, -f2 | sort -n | tail -1)
+max_inference_lag=$(tail -n +2 "$RESULTS/lag.csv" | cut -d, -f3 | sort -n | tail -1)
+timeouts=$(grep -c 'model overloaded' "$RESULTS/inference.log" || true)
+
+# Model latency and time to insight (ms) for the idle window (the first IDLE seconds) and the
+# spike window (the hold), by when each webhook was received.
+idle_end=$(secs "$IDLE") spike_start=$(( $(secs "$IDLE") + $(secs "$RAMP") ))
+spike_end=$(( spike_start + $(secs "$HOLD") ))
+window() { # window idle|spike -> "count model_p50 model_p95 tti_p50 tti_p95" (0s if empty)
+  local from to
+  if [ "$1" = idle ]; then from=0 to=$idle_end; else from=$spike_start to=$spike_end; fi
+  sql "WITH t AS (SELECT min(received_at) AS t0 FROM insights),
+            w AS (SELECT model_ms, extract(epoch FROM created_at - received_at) * 1000 AS tti
+                  FROM insights, t
+                  WHERE received_at >= t0 + make_interval(secs => $from)
+                    AND received_at <  t0 + make_interval(secs => $to))
+       SELECT count(*),
+              coalesce(round(percentile_cont(0.5)  WITHIN GROUP (ORDER BY model_ms)), 0),
+              coalesce(round(percentile_cont(0.95) WITHIN GROUP (ORDER BY model_ms)), 0),
+              coalesce(round(percentile_cont(0.5)  WITHIN GROUP (ORDER BY tti)), 0),
+              coalesce(round(percentile_cont(0.95) WITHIN GROUP (ORDER BY tti)), 0)
+       FROM w" | tr '|' ' '
+}
+read -r idle_n idle_m50 idle_m95 idle_t50 idle_t95 <<<"$(window idle)"
+read -r spike_n spike_m50 spike_m95 spike_t50 spike_t95 <<<"$(window spike)"
+flat() { (( spike_n > 0 && idle_n > 0 && spike_m95 * 10 <= idle_m95 * 11 )); } # within +10%
+overloaded() { (( timeouts > 0 || (idle_m95 > 0 && spike_m95 >= 2 * idle_m95) )); }
 
 failures=0
 check() { # check <description> <condition...>
   if "${@:2}"; then printf '  PASS  %s\n' "$1"; else printf '  FAIL  %s\n' "$1"; failures=$((failures + 1)); fi
 }
 {
-  echo "Spike test $(basename "$RESULTS"): ramp to ${RATE} req/s over ${RAMP}, hold ${HOLD}"
+  echo "Spike test $(basename "$RESULTS"): idle ${IDLE_RATE}/s for ${IDLE}, then ${RATE}/s (ramp ${RAMP}, hold ${HOLD})"
+  echo "Inference: ${INFERENCE_WORKERS} workers; model capacity ${MODEL_CAPACITY}, ${MODEL_LATENCY}, timeout ${MODEL_TIMEOUT}"
   echo
-  echo "  requests sent           ${REQUESTS} (${DUPLICATES_SENT} deliberate duplicates)"
-  echo "  unique webhooks sent     ${UNIQUE_SENT}, accepted ${UNIQUE_ACCEPTED}"
-  echo "  interactions in Postgres ${rows} (${unknown} to the unknown number, ${leads} leads)"
-  echo "  edge latency ms          p50 ${P50_MS}  p95 ${P95_MS}  p99 ${P99_MS}  max ${MAX_MS}"
-  echo "  failed requests          $(python3 -c "print(f'{${FAILED_RATE} * 100:.3f}%')")"
-  echo "  peak consumer lag        ${max_lag} messages; drained ${drain_s}s after k6 finished"
-  echo "  dead letters             ${dlq}"
+  echo "  requests sent             ${REQUESTS} (${DUPLICATES_SENT} deliberate duplicates)"
+  echo "  unique webhooks sent       ${UNIQUE_SENT}, accepted ${UNIQUE_ACCEPTED}"
+  echo "  edge latency ms            p50 ${P50_MS}  p95 ${P95_MS}  p99 ${P99_MS}  max ${MAX_MS}"
+  echo "  failed requests            $(python3 -c "print(f'{${FAILED_RATE} * 100:.3f}%')")"
+  echo "  interactions               ${rows} (${unknown} to the unknown number, ${leads} leads)"
+  echo "  attribution lag            peak ${max_lag}; drained ${attribution_drain_s}s after k6 finished"
+  echo "  insights                   ${insights}"
+  echo "  inference lag              peak ${max_inference_lag}; drained ${inference_drain_s}s after k6 finished"
+  echo "  model latency ms           idle p50 ${idle_m50} p95 ${idle_m95} (${idle_n})  spike p50 ${spike_m50} p95 ${spike_m95} (${spike_n})"
+  echo "  time to insight ms         idle p50 ${idle_t50} p95 ${idle_t95}  spike p50 ${spike_t50} p95 ${spike_t95}"
+  echo "  model timeouts (retried)   ${timeouts}"
+  echo "  dead letters               ${dlq}"
   echo
   check "k6 thresholds met (0% failed, p99 < 50 ms)" test "$k6_status" -eq 0
-  check "zero loss: every accepted webhook is in Postgres" test "$rows" -ge "$UNIQUE_ACCEPTED"
+  check "zero loss: every accepted webhook is an interaction" test "$rows" -ge "$UNIQUE_ACCEPTED"
   # A webhook can be stored yet answered 503 (its timeout fired as the PubAck arrived), so rows
   # may exceed "accepted"; a real duplicate is a row beyond anything that was ever sent.
-  check "zero duplicates: no more rows than webhooks sent" test "$rows" -le "$UNIQUE_SENT"
-  check "nothing dead-lettered" test "$dlq" -eq 0
-  check "backlog fully drained" test "$(nats_stat consumer_pending)" -eq 0
+  check "zero duplicates: no more interactions than webhooks sent" test "$rows" -le "$UNIQUE_SENT"
+  check "attribution backlog fully drained" test "$ap" -eq 0
+  if [ "$MODE" = normal ]; then
+    check "model latency flat: spike p95 within 10% of idle p95" flat
+    check "zero loss: every accepted webhook has an insight" test "$insights" -ge "$UNIQUE_ACCEPTED"
+    check "zero duplicates: no more insights than webhooks sent" test "$insights" -le "$UNIQUE_SENT"
+    check "inference backlog fully drained" test "$ip" -eq 0
+    check "nothing dead-lettered" test "$dlq" -eq 0
+  else
+    # Control: without the limit the model is expected to overload, losing work to timeouts
+    # and dead letters. If it doesn't, the experiment can't tell the protection apart.
+    check "model overloaded without the limit (timeouts, or spike p95 at least 2x idle)" overloaded
+  fi
 } >"$RESULTS/report.txt" # not "| tee": a pipeline would run check in a subshell and lose $failures
 cat "$RESULTS/report.txt"
 
@@ -151,9 +218,11 @@ machine="$(nproc) CPU, $(grep -qi microsoft /proc/version && echo 'Ubuntu WSL2' 
 failed_pct=$(python3 -c "print(f'{${FAILED_RATE} * 100:.3f}%')")
 match="$([ "$rows" -ge "$UNIQUE_ACCEPTED" ] && [ "$rows" -le "$UNIQUE_SENT" ] && echo ✓ || echo ✗) ${rows}"
 echo
-echo "Row for docs/benchmarks.md:"
+echo "Rows for docs/benchmarks.md:"
 echo "| $(date +%F) | \`${commit}\` | ${machine} | ${RATE}/s, ramp ${RAMP}, hold ${HOLD} |" \
-  "${P50_MS} / ${P99_MS} ms | ${failed_pct} | ${max_lag} | ${drain_s}s | ${match} | ${dlq} |"
+  "${P50_MS} / ${P99_MS} ms | ${failed_pct} | ${max_lag} | ${attribution_drain_s}s | ${match} | ${dlq} |"
+echo "| $(date +%F) | \`${commit}\` | ${MODE}, ${INFERENCE_WORKERS} workers | ${idle_m95} / ${spike_m95} ms |" \
+  "${idle_t95} / ${spike_t95} ms | ${max_inference_lag} | ${inference_drain_s}s | ${insights} | ${timeouts} | ${dlq} |"
 echo
 
 [ "$failures" -eq 0 ] && log "PASS ($RESULTS)" || { log "FAIL: ${failures} check(s) ($RESULTS)"; exit 1; }

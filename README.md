@@ -76,6 +76,7 @@ Calls to numbers missing from `tracking_numbers` are attributed to `unknown`. Ad
 go test ./...                     # unit tests; no services needed
 go test -tags integration -count=1 ./...   # plus integration and end-to-end tests; needs .env loaded
 ./loadtest/run.sh                 # spike test (needs k6), isolated from your dev data
+MODE=control ./loadtest/run.sh    # same spike without the inference limit: the model overloads
 ```
 
 Integration tests start their own NATS server and throwaway databases. `-count=1` turns off

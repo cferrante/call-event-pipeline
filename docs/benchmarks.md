@@ -20,6 +20,16 @@ long after the spike ended it reached 0. **Rows** is interactions in Postgres, â
 least the unique webhooks that got a 200 (zero loss) and at most the unique webhooks sent (zero
 duplicates).
 
+## Inference (M2)
+
+| Date | Commit | Mode | Model p95 idle / spike | Time to insight p95 idle / spike | Peak inference lag | Drained after | Insights | Model timeouts | Dead letters |
+|---|---|---|---|---|---|---|---|---|---|
+
+Rows come from the same runs as the table above (`run.sh` prints both). **Mode** is `normal`
+(workers = model capacity) or `control` (the limit removed). The load-test model profile is
+10 ms latency, 200 ms timeout, capacity 4 (see the [M2 plan](plan-m2.md#deviations-from-the-plan)).
+Model latency should stay flat in `normal`; time to insight rises during the spike by design.
+
 ## Notes
 
 ### 2026-10-28, `2f7278d`: M1 baseline
