@@ -232,3 +232,20 @@ func TestIsE164(t *testing.T) {
 		}
 	}
 }
+
+func TestIDParam(t *testing.T) {
+	tests := []struct {
+		ch     Channel
+		want   string
+		wantOK bool
+	}{
+		{Voice, "CallSid", true},
+		{SMS, "MessageSid", true},
+		{Channel("fax"), "", false},
+	}
+	for _, tt := range tests {
+		if got, ok := IDParam(tt.ch); got != tt.want || ok != tt.wantOK {
+			t.Errorf("IDParam(%q) = %q, %v; want %q, %v", tt.ch, got, ok, tt.want, tt.wantOK)
+		}
+	}
+}

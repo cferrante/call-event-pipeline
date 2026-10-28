@@ -17,6 +17,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/cferrante/decoupled-ingestion-layer/internal/envelope"
 	"github.com/cferrante/decoupled-ingestion-layer/internal/twilio"
 )
 
@@ -73,18 +74,14 @@ func run(o options) error {
 
 // buildRequest creates the webhook POST for o, sent to o.target but signed for o.publicURL.
 func buildRequest(o options) (*http.Request, error) {
-	idParam, idPrefix := "", ""
-	switch o.channel {
-	case "voice":
-		idParam, idPrefix = "CallSid", "CA"
-	case "sms":
-		idParam, idPrefix = "MessageSid", "SM"
-	default:
+	ch := envelope.Channel(o.channel)
+	idParam, ok := envelope.IDParam(ch)
+	if !ok {
 		return nil, fmt.Errorf("channel must be voice or sms, got %q", o.channel)
 	}
 	id := o.id
 	if id == "" {
-		id = idPrefix + randomHex(16)
+		id = twilioIDPrefix[ch] + randomHex(16)
 	}
 
 	form := url.Values{idParam: {id}, "From": {o.from}, "To": {o.to}}
@@ -93,10 +90,11 @@ func buildRequest(o options) (*http.Request, error) {
 	}
 
 	path := "/webhooks/" + o.channel
-	signature := twilio.Signature(o.token, strings.TrimSuffix(o.publicURL, "/")+path, form)
+	token := o.token
 	if o.badSignature {
-		signature = twilio.Signature("wrong-token", o.publicURL+path, form)
+		token = "wrong-token"
 	}
+	signature := twilio.Signature(token, strings.TrimSuffix(o.publicURL, "/")+path, form)
 
 	req, err := http.NewRequest(http.MethodPost, strings.TrimSuffix(o.target, "/")+path, strings.NewReader(form.Encode()))
 	if err != nil {
@@ -106,6 +104,9 @@ func buildRequest(o options) (*http.Request, error) {
 	req.Header.Set("X-Twilio-Signature", signature)
 	return req, nil
 }
+
+// twilioIDPrefix is how Twilio's provider IDs start for each channel.
+var twilioIDPrefix = map[envelope.Channel]string{envelope.Voice: "CA", envelope.SMS: "SM"}
 
 func randomHex(n int) string {
 	b := make([]byte, n)

@@ -42,6 +42,13 @@ var idParam = map[Channel]string{
 	SMS:   "MessageSid",
 }
 
+// IDParam returns the webhook form parameter that holds a channel's provider ID, e.g. CallSid
+// for voice, and false for an unknown channel.
+func IDParam(ch Channel) (string, bool) {
+	name, ok := idParam[ch]
+	return name, ok
+}
+
 // FromWebhook builds an envelope from a Twilio webhook's form parameters. receivedAt is
 // passed in rather than read from the clock so callers (and tests) control it.
 func FromWebhook(ch Channel, params url.Values, receivedAt time.Time) (Envelope, error) {

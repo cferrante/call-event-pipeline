@@ -289,6 +289,21 @@ declined. Each fix was made test-first, with a deliberate break where a test cou
    rows > sent. Verified with four short runs: normal (PASS), 5 stored-but-503 webhooks
    simulated (now PASS; the old check failed), an extra row (FAIL), real loss (FAIL).
 
+10. **Fixed: small duplications.** sendhook now takes each channel's ID parameter from
+    `envelope.IDParam` instead of repeating the mapping, and computes its signed URL once, so the
+    `-bad-signature` path can't diverge from the normal one. The empty TwiML response is one
+    constant shared by SMS and unforwarded calls.
+
+**Declined:**
+
+4. **"The dead-letter publish has no timeout."** It does: nats.go wraps a context that has no
+   deadline in its default API timeout (`wrapContextWithoutDeadline`), so it can't run past
+   `AckWait`. Checked in the nats.go v1.54.0 source.
+9. **"Small config helpers are duplicated"** (default NATS URL, the `DATABASE_URL` guard, password
+   redaction): true, with two copies each. Following the rule of three, a shared helper is worth
+   it at the third copy, not the second; two short copies in separate `main` packages are
+   cheaper than a new shared package.
+
 Found while fixing these: **Go's test cache doesn't track the binaries the e2e tests build**, so
 `go test -tags integration ./...` reported a stale `ok` after `cmd/attribution` changed. The README
 now runs integration tests with `-count=1`.
