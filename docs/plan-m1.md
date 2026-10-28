@@ -272,6 +272,12 @@ declined. Each fix was made test-first, with a deliberate break where a test cou
    held 100 unacked messages before the fix and at most 11 (10 buffered + 1 in progress) after.
    Effect on throughput is measured in [benchmarks](benchmarks.md).
 
+6. **Fixed: `From` was checked as E.164 after adding a missing `+`, but stored without it**, so
+   `14158675310` and `+14158675310` could become two leads for one person, and SMS short codes
+   became leads. Only an E.164 `From` now identifies a lead; anything else is treated like a
+   withheld caller ID (the interaction is kept and credited, with no lead). Test: two new cases
+   that the old code got wrong.
+
 Found while fixing these: **Go's test cache doesn't track the binaries the e2e tests build**, so
 `go test -tags integration ./...` reported a stale `ok` after `cmd/attribution` changed. The README
 now runs integration tests with `-count=1`.

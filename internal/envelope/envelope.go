@@ -104,12 +104,11 @@ var withheldCallerIDs = keypadNumbers("ANONYMOUS", "RESTRICTED", "BLOCKED", "UNA
 
 // AnonymousCaller reports whether the caller withheld their number, so From can't
 // identify a lead.
+//
+// Only an E.164 From can identify a lead, because leads are keyed by From exactly as stored:
+// accepting "14158675310" would create a second lead for "+14158675310".
 func (e Envelope) AnonymousCaller() bool {
-	from := e.From
-	if !strings.HasPrefix(from, "+") {
-		from = "+" + from
-	}
-	return !IsE164(from) || withheldCallerIDs[strings.TrimPrefix(from, "+")]
+	return !IsE164(e.From) || withheldCallerIDs[strings.TrimPrefix(e.From, "+")]
 }
 
 // keypadNumbers returns the digits each word produces on a phone keypad.

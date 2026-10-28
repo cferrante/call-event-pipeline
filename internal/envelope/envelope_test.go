@@ -139,6 +139,10 @@ func TestAnonymousCaller(t *testing.T) {
 		{"+2562533", true},     // BLOCKED
 		{"+86282452253", true}, // UNAVAILABLE
 		{"+8656696", true},     // UNKNOWN
+		// Leads are keyed by From as stored, so only E.164 can identify one. Accepting these
+		// would create a second lead for +14158675310, or a lead for a short code.
+		{"14158675310", true},
+		{"12345", true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.from, func(t *testing.T) {
