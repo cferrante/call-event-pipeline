@@ -170,6 +170,13 @@ dual write and transactional outbox were added with this plan.)
   not judged. Short runs proved each check: normal checks with 200 workers fail on flatness
   (p95 11 → 190 ms, ~1,500 timeouts); control with 4 workers fails on "overloaded"; stopping
   inference fails the insight-loss and drain checks.
+- **Step 6 found an M1 bug: the ingest server closed idle connections after 10 seconds.** The
+  first full run failed 2 of 71,372 requests. With k6 now logging failures, an idle-heavy run
+  reproduced 7, all with no HTTP response (`EOF`, `connection reset by peer`): the keep-alive
+  race, where a client sends a request on a connection the server is closing. `IdleTimeout` was
+  never set, so Go used `ReadTimeout` (10 s). It's now 120 s, longer than Go clients' 90 s, so
+  clients close idle connections first. Same run after the fix: 0 failures. Twilio would have
+  hit this too, and had to retry.
 
 ## Code-review outcomes
 
