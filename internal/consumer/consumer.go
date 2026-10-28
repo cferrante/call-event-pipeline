@@ -33,7 +33,7 @@ const (
 	// recordTimeout keeps one attempt shorter than ackWait, so a stuck attempt fails and is
 	// retried by us rather than redelivered while it is still running.
 	recordTimeout = 20 * time.Second
-	// maxDeliver is the most attempts a message gets.
+	// maxDeliver is the most attempts a message gets; the last one dead-letters on failure.
 	maxDeliver = 5
 )
 
@@ -59,10 +59,12 @@ func EnsureConsumer(ctx context.Context, js jetstream.JetStream) (jetstream.Cons
 		return nil, fmt.Errorf("ensure stream %s: %w", DLQStream, err)
 	}
 	cons, err := js.CreateOrUpdateConsumer(ctx, stream.StreamName, jetstream.ConsumerConfig{
-		Durable:    ConsumerName,
-		AckPolicy:  jetstream.AckExplicitPolicy,
-		AckWait:    ackWait,
-		MaxDeliver: maxDeliver,
+		Durable:   ConsumerName,
+		AckPolicy: jetstream.AckExplicitPolicy,
+		AckWait:   ackWait,
+		// One spare delivery: if dead-lettering fails on the final attempt (or the worker
+		// crashes during it), JetStream redelivers once more instead of stranding the message.
+		MaxDeliver: maxDeliver + 1,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ensure consumer %s: %w", ConsumerName, err)

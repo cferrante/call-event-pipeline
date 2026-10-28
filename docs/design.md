@@ -89,7 +89,7 @@ can slow the edge, because the stream sits between them.
 | Storage | File | Survives restarts |
 | Retention | Limits (max age 7d) | Lets new consumers (e.g. M2) replay history |
 | Duplicate window | 10 min | Covers provider retry bursts; DB constraint covers beyond |
-| Consumer `attribution` | Durable pull, `AckExplicit`, `AckWait 30s`, `MaxDeliver 5`, no `BackOff` | Pull lets workers fetch only what they can handle |
+| Consumer `attribution` | Durable pull, `AckExplicit`, `AckWait 30s`, `MaxDeliver 6` (5 attempts + 1 spare), no `BackOff` | Pull lets workers fetch only what they can handle |
 | Retry delays | `NakWithDelay` 1s, 5s, then 30s per attempt | JetStream's `BackOff` replaces `AckWait` with its first value, so a write slower than 1s would be redelivered while still running ([section 5.5](#55-delivery-guarantees)) |
 | Stream `LEADS_DLQ` | Subject `leads.dlq`, file storage, max age 30d | Messages that can never succeed, kept for a human to inspect |
 
@@ -114,9 +114,11 @@ can slow the edge, because the stream sits between them.
 - Error handling:
   - **Transient** (DB down, timeout) → `Nak` with delay; JetStream redelivers.
   - **Permanent** (unparseable envelope) → publish to `leads.dlq`, then `Term`.
-  - **Retries exhausted** → on the final attempt (`MaxDeliver` = 5) the worker publishes to
+  - **Retries exhausted** → when attempt 5 (or later) fails, the worker publishes to
     `leads.dlq` itself, then `Term`. It doesn't rely on JetStream's max-deliveries advisory,
-    which is an unstored message lost if no listener is running at that moment.
+    which is an unstored message lost if no listener is running at that moment. The consumer
+    allows one spare delivery (`MaxDeliver` 6), so if that dead-letter write fails, or the
+    worker crashes during attempt 5, the message is delivered once more and dead-lettered then.
 
 ### 5.4 Inference consumer (M2, sketch only)
 
@@ -273,8 +275,8 @@ Known limitations (deliberately out of M1):
   interaction stores its campaign at write time.
 - **Replies to our own outreach** look like inbound contacts until outbound calls/SMS are
   ingested.
-- **A worker crash during a message's final attempt** leaves that message undelivered but out of
-  the DLQ: JetStream won't redeliver it, and no worker is left to dead-letter it. The same
-  happens if the DLQ write itself fails on the final attempt. The message isn't lost (it stays
-  in `LEADS` for 7 days) and consumer metrics show it. The upgrade path is to capture
-  JetStream's max-deliveries advisories in their own stream and dead-letter from there.
+- **Two failures in a row at the end of a message's retries** (e.g. the dead-letter write fails
+  on attempt 5 *and* on the spare delivery, or a worker crashes during both) leave the message
+  undelivered but out of the DLQ. It isn't lost (it stays in `LEADS` for 7 days) and consumer
+  metrics show it. The upgrade path is to capture JetStream's max-deliveries advisories in
+  their own stream and dead-letter from there.

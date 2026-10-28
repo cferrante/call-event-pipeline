@@ -368,3 +368,50 @@ func TestShutdownFinishesBufferedMessagesWithLiveContext(t *testing.T) {
 		t.Errorf("deliveries = %d, Record calls = %d; want equal (no retries caused by shutdown)", info.Delivered.Consumer, calls)
 	}
 }
+
+// hookRecorder always fails, calling onCall(n) first on its nth call.
+type hookRecorder struct {
+	mu     sync.Mutex
+	n      int
+	onCall func(n int)
+}
+
+func (r *hookRecorder) Record(context.Context, envelope.Envelope) (bool, error) {
+	r.mu.Lock()
+	r.n++
+	n := r.n
+	r.mu.Unlock()
+	r.onCall(n)
+	return false, errors.New("database unavailable")
+}
+
+// If dead-lettering fails on the final attempt, JetStream must still have one delivery left,
+// so the message is retried and dead-lettered rather than stranded. The failure is real: the
+// DLQ stream is deleted before attempt 5 and recreated before attempt 6.
+func TestFailedDeadLetterOnFinalAttemptIsRetried(t *testing.T) {
+	rec := &hookRecorder{}
+	h := start(t, rec)
+	rec.onCall = func(n int) {
+		switch n {
+		case maxDeliver:
+			if err := h.js.DeleteStream(h.ctx, DLQStream); err != nil {
+				t.Errorf("delete DLQ: %v", err)
+			}
+		case maxDeliver + 1:
+			if _, err := EnsureConsumer(h.ctx, h.js); err != nil {
+				t.Errorf("recreate DLQ: %v", err)
+			}
+		}
+	}
+
+	h.publish(t, "CA1")
+	info := h.waitSettled(t)
+
+	if info.Delivered.Consumer != maxDeliver+1 {
+		t.Fatalf("deliveries = %d, want %d: no spare delivery after the failed dead-letter",
+			info.Delivered.Consumer, maxDeliver+1)
+	}
+	if n := len(h.dlqMessages(t)); n != 1 {
+		t.Errorf("dead-lettered %d messages, want 1", n)
+	}
+}

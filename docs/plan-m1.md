@@ -259,6 +259,12 @@ declined. Each fix was made test-first, with a deliberate break where a test cou
    Ingest is unaffected, since its publishes already wait for their PubAck. Not covered by a test:
    whether unsent acks are lost at exit depends on timing, so a test couldn't reliably show it.
 
+2. **Fixed: a failed dead-letter write on the final attempt stranded the message**, because
+   JetStream had no deliveries left to retry it. The consumer now allows one spare delivery
+   (`MaxDeliver` 6 for 5 attempts), which also covers a worker crashing during attempt 5. Test:
+   the DLQ stream is really deleted before attempt 5 and recreated before attempt 6; before the
+   fix there was no attempt 6. The spec's known limitation narrows to two failures in a row.
+
 Found while fixing these: **Go's test cache doesn't track the binaries the e2e tests build**, so
 `go test -tags integration ./...` reported a stale `ok` after `cmd/attribution` changed. The README
 now runs integration tests with `-count=1`.

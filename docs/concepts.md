@@ -245,8 +245,10 @@ single Go binary.
 
 The most times JetStream will deliver one message to a consumer. After that it stops
 redelivering, but the message stays in the stream.
-*In this project:* 5. A message whose fifth attempt fails is dead-lettered by the worker itself
-rather than via an [advisory](#advisory), so it's caught even if no listener is running.
+*In this project:* 6, meaning 5 attempts plus one spare. A message whose fifth attempt fails is
+dead-lettered by the worker itself rather than via an [advisory](#advisory), so it's caught
+even if no listener is running. The spare delivery covers a dead-letter write that fails, or a
+worker that crashes, during that fifth attempt.
 
 ### Message ID
 
