@@ -1,7 +1,8 @@
 # Concepts guide
 
 New to NATS, JetStream or event-driven systems? Read [Life of a lead](#life-of-a-lead) first,
-then use the [glossary](#glossary) to look things up. The [design spec](design.md) explains
+then [Life of an insight](#life-of-an-insight) for the AI side, and use the
+[glossary](#glossary) to look things up. The [design spec](design.md) explains
 *why* the system is built this way; this page explains the words it uses.
 
 ## Life of a lead
@@ -52,6 +53,45 @@ and [terms](#term) it so it's never delivered again.
 delivery: if a worker crashes after writing to Postgres but before acking, the message is
 delivered again. That's safe because step 6 is idempotent. The full reasoning is in
 [design section 5.5](design.md#55-delivery-guarantees).
+
+## Life of an insight
+
+The same webhook also gets an AI classification (milestone 2). This path runs alongside
+attribution, at its own pace.
+
+**1. The same stored event.** Nothing new is published: the event already in the `LEADS`
+stream is read a second time, by a different [consumer](#consumer), `inference`, with its own
+progress. A slow model therefore never holds back attribution, and vice versa: a
+[bulkhead](#bulkhead).
+
+**2. A fixed number of workers.** The inference service runs a [worker pool](#worker-pool) of
+4, matching the model's [capacity](#capacity): the number of calls it can serve at full speed.
+JetStream backs this up with [MaxAckPending](#maxackpending) = 4, so it never hands out more
+than 4 unfinished messages, however many inference processes run.
+
+**3. Skip what's already done.** A worker first checks whether this interaction already has an
+insight. If so (a [redelivery](#redelivery)), it acks without calling the model, so repeats
+don't spend model capacity.
+
+**4. Call the model.** The worker sends the SMS text to the [inference](#inference) model and
+times only that call: [model latency](#model-latency). In milestone 2 the model is a stub that
+behaves like a real one, slowing down when given more calls than its capacity and timing out
+when badly overloaded.
+
+**5. Store the insight.** The result (intent, score, model version, model latency) goes into
+the `insights` table, once per interaction. The time from the webhook arriving to this moment
+is [time to insight](#time-to-insight).
+
+**6. During a spike.** Webhooks arrive far faster than the model can classify them. The extra
+messages wait in the stream ([consumer lag](#consumer-lag)), so time to insight rises, but the
+model still only ever sees 4 calls at once, so model latency stays flat. Once the spike passes,
+the backlog drains.
+
+**7. Without the limit.** The spike test's [control experiment](#control-experiment) removes the
+limit (200 workers). The model is overloaded, calls time out, retries spend capacity on calls
+that fail again, and the backlog takes *longer* to drain despite 50 times the workers:
+[congestion collapse](#congestion-collapse). Measured results are in
+[benchmarks](benchmarks.md).
 
 ## Glossary
 
@@ -105,6 +145,30 @@ so any processing slower than that value is redelivered while still running.
 *In this project:* deliberately not used; retry delays come from [NakWithDelay](#nak) instead.
 See [design section 5.2](design.md#52-jetstream-configuration).
 
+### Bulkhead
+
+Splitting a system into compartments so a failure or overload in one can't sink the others,
+named after the watertight sections of a ship's hull.
+*In this project:* attribution and inference are separate [consumers](#consumer) with separate
+progress, so a slow model can't hold back attribution. They still share Postgres and the CPU,
+which is why attribution drains more slowly under load with inference running (see
+[benchmarks](benchmarks.md)).
+
+### Capacity
+
+How much work something can do at once at full speed. Beyond it, work either waits or slows
+everything down.
+*In this project:* the stub model serves 4 calls at once; each call beyond that makes all of them
+slower.
+
+### Congestion collapse
+
+When an overloaded system gets *less* useful work done the more it's given, because effort goes
+into work that fails and is retried.
+*In this project:* in the spike test's [control experiment](#control-experiment), 200 workers
+overloaded the model; timed-out calls were retried, and inference took twice as long to drain
+as with 4 workers.
+
 ### Consumer
 
 JetStream's record of one reader's progress through a [stream](#stream): which messages it has
@@ -137,6 +201,13 @@ but not yet processed. JetStream reports it as `num_pending`.
 
 The edge accepted every webhook in about a millisecond the whole time. More details are in
 [benchmarks](benchmarks.md).
+
+### Control experiment
+
+A run with the thing being tested taken away, to check it's actually what makes the
+difference. If the control looks the same as the real run, the experiment can't tell anything.
+*In this project:* `MODE=control ./loadtest/run.sh` removes the inference worker limit; the
+model must visibly overload, or the test fails.
 
 ### Coordinated omission
 
@@ -237,6 +308,12 @@ An operation is idempotent if doing it twice has the same effect as doing it onc
 *In this project:* recording an interaction is idempotent because its insert is skipped when the
 `provider_id` already exists; see [design section 5.5](design.md#55-delivery-guarantees).
 
+### Inference
+
+Running a trained AI model on an input to get a prediction, as opposed to training it.
+*In this project:* classifying each interaction's intent (sales, support, unknown). Milestone 2
+uses a stub model that behaves like a real one under load; a real model could replace it.
+
 ### JetStream
 
 The persistence layer built into the NATS server. It adds [streams](#stream) (stored messages),
@@ -248,6 +325,13 @@ The persistence layer built into the NATS server. It adds [streams](#stream) (st
 A free, open-source load-testing tool. Test scripts are written in JavaScript; k6 itself is a
 single Go binary.
 *In this project:* `loadtest/spike.js`, run by `loadtest/run.sh`.
+
+### MaxAckPending
+
+A consumer setting: the most messages JetStream will have handed out without an [ack](#ack).
+When it's reached, JetStream sends nothing more until one is acked. It's enforced on the server,
+so it holds however many workers or processes there are.
+*In this project:* `inference` uses 4, the model's [capacity](#capacity).
 
 ### MaxDeliver
 
@@ -407,6 +491,12 @@ A simulated client in a load test that runs the test script in a loop. Often sho
 ### Webhook
 
 An HTTP request a service (here Twilio) sends to your server when something happens.
+
+### Worker pool
+
+A fixed number of workers that take jobs from a queue, so no more than that many run at once.
+*In this project:* the inference service runs 4 workers, matching the model's
+[capacity](#capacity); attribution runs 1.
 
 ### X-Twilio-Signature
 
