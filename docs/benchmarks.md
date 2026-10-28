@@ -15,6 +15,8 @@ Numbers are only comparable between rows with the same machine.
 | 2026-10-28 | `607534e` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s | 0.47 / 2.02 ms | 0.000% | 27123 | 37s | ✓ 67499 | 0 |
 | 2026-10-28 | `8fcfd76` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s; + inference (normal) | 0.71 / 3.60 ms | 0.000% | 44105 | 154s | ✓ 67999 | 0 |
 | 2026-10-28 | `8fcfd76` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s; + inference (control) | 0.71 / 3.66 ms | 0.000% | 41741 | 90s | ✓ 67999 | 10 (inference) |
+| 2026-10-28 | `b0c2515` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s; + inference (normal) | 0.67 / 3.04 ms | 0.000% | 40749 | 142s | ✓ 67999 | 0 |
+| 2026-10-28 | `b0c2515` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s; + inference (control) | 0.71 / 3.17 ms | 0.000% | 41671 | 682s | ✓ 67999 | 0 |
 
 Columns: **Load** is peak rate, ramp and hold. **Edge** latency is k6's view of the ingest
 service. **Peak lag** is the attribution consumer's largest backlog, and **Drained after** is how
@@ -28,6 +30,8 @@ duplicates).
 |---|---|---|---|---|---|---|---|---|---|
 | 2026-10-28 | `8fcfd76` | normal, 4 workers | 11 / 11 ms | 16 ms / 149 s | 45642 | 162s | 67999 (all) | 0 | 0 |
 | 2026-10-28 | `8fcfd76` | control, 200 workers | 12 / 190 ms | 17 ms / 287 s | 47503 | 321s | 67989 (10 lost) | 29610 | 10 |
+| 2026-10-28 | `b0c2515` | normal, 4 workers | 11.85 / 11.66 ms | 17 ms / 148 s | 45402 | 163s | 67999 (all) | 0 | 0 |
+| 2026-10-28 | `b0c2515` | control, 200 workers | 11.84 / 189.76 ms | 16 ms / 797 s | 51754 | 837s | 67999 (all, after retries) | 25134 | 0 |
 
 Rows come from the same runs as the table above (`run.sh` prints both). **Mode** is `normal`
 (workers = model capacity) or `control` (the limit removed). The load-test model profile is
@@ -111,3 +115,20 @@ step if attribution's drain time mattered.
 **Not in the table:** the first full run, on `4ed6e5b`, failed 2 of 71,372 requests. That led
 to finding and fixing the ingest server's 10-second idle timeout in `8fcfd76` (see the
 [M2 plan](plan-m2.md#deviations-from-the-plan)); both runs above are after the fix.
+
+### 2026-10-28, `b0c2515`: after the M2 code-review fixes
+
+Re-run because three fixes changed how results are measured: model latency is now fractional
+(not whole milliseconds), the drain wait checks row counts, and the windows start at the first
+interaction.
+
+**Normal: unchanged.** Model p95 11.85 ms idle and 11.66 ms in the spike; time to insight p95 148 s;
+zero loss, nothing dead-lettered.
+
+**Control: overloaded again, but much slower to drain** than the earlier control run: inference
+837 s (was 321 s), attribution 682 s (was 90 s), and 0 dead letters (was 10). None of the fixes
+changed what the services do in control mode, so this is most likely variance amplified by
+overload: 200 workers retrying against the same Postgres and CPU slow everything, attribution
+included, by amounts that differ a lot between runs. One run of each isn't enough to say more.
+It does reinforce the earlier note: the stream keeps the queues separate, but protecting
+attribution from an overloaded neighbour would need a resource-level bulkhead too.

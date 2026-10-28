@@ -227,8 +227,10 @@ one decision (finding 1) made by you. Fixes were made test-first with deliberate
 ### Spike test
 
 At `8fcfd76`, `./loadtest/run.sh` (normal) and `MODE=control ./loadtest/run.sh`: 20 s idle at 20/s,
-then 1,000/s for 70 s, with the load-test model profile. **Both PASS.** Details and curves are in
-[benchmarks](benchmarks.md).
+then 1,000/s for 70 s, with the load-test model profile. **Both PASS.** Re-run at `b0c2515` after
+the code-review fixes: both PASS again, with model p95 11.85 ms idle and 11.66 ms in the spike;
+the control run drained much more slowly than before (see [benchmarks](benchmarks.md)). Details
+and curves are in [benchmarks](benchmarks.md).
 
 | Target ([spec section 8](design.md#8-measuring-absorbing-spikes)) | Result | |
 |---|---|---|
