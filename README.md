@@ -24,8 +24,8 @@ Go · NATS JetStream · PostgreSQL · k6 (load testing). Everything runs nativel
 
 ## Status
 
-Milestone 1 in progress: the ingest and attribution services run end to end; the spike test is
-next. See the [design spec](docs/design.md) for the architecture and decisions, and the
+Milestone 1 in progress: the services run end to end and pass the spike test (see
+[benchmarks](docs/benchmarks.md)); the conversation report and code review are next. See the [design spec](docs/design.md) for the architecture and decisions, and the
 [M1 plan](docs/plan-m1.md) for progress.
 
 - **M1:** ingest edge, attribution consumer, dead-letter handling, spike test proving zero
@@ -71,6 +71,7 @@ Calls to numbers missing from `tracking_numbers` are attributed to `unknown`. Ad
 ```bash
 go test ./...                     # unit tests; no services needed
 go test -tags integration ./...   # plus integration and end-to-end tests; needs .env loaded
+./loadtest/run.sh                 # spike test (needs k6), isolated from your dev data
 ```
 
 Integration tests start their own NATS server and throwaway databases. Without `.env` loaded

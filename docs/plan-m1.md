@@ -230,6 +230,16 @@ and you can start and stop NATS and Postgres yourself.
 - **Step 10b: end-to-end tests (`e2e/`) build and run the real binaries** against a throwaway
   NATS server and database, which also covers the `main` wiring: config, startup migrations
   and clean exit on Ctrl-C.
+- **Step 11: `loadtest/run.sh` runs the spike in isolation**: a fresh `leads_loadtest` database
+  and its own NATS server on separate ports, both removed afterwards, so about 70,000 test rows
+  never touch the dev database. It decides PASS/FAIL itself and exits non-zero on failure.
+- **Step 11: k6 uses an arrival-rate executor**, so load doesn't drop when the server slows
+  (no coordinated omission); see the [concepts guide](concepts.md#coordinated-omission).
+- **Step 11: `run.sh` reads NATS's JSON stats with a two-line `python3` snippet**, because `jq`
+  isn't installed and `grep` on JSON would be fragile. It's a test helper, not a service.
+- **Step 11: benchmark history lives in [`docs/benchmarks.md`](benchmarks.md)**, one row per
+  notable run with the git commit and machine, since this plan becomes history after M1.
+  `run.sh` prints a ready-to-paste row; it never edits tracked files itself.
 
 ## Code-review outcomes
 

@@ -84,6 +84,14 @@ turns.
 *In this project:* the migrator holds one so two services starting at once don't apply the
 same migration twice.
 
+### Arrival rate
+
+A way of generating load: start a fixed number of requests per second, whether or not earlier
+ones have finished, like real traffic. The alternative, a fixed number of
+[virtual users](#virtual-user) each waiting for a reply before sending again, lets a slow server
+quietly reduce its own load; see [coordinated omission](#coordinated-omission).
+*In this project:* the spike test uses k6's `ramping-arrival-rate` [executor](#executor).
+
 ### At-least-once
 
 See [delivery guarantees](#delivery-guarantees).
@@ -110,6 +118,13 @@ How far a [consumer](#consumer) is behind the newest message: the number of mess
 but not yet processed. JetStream reports it as `num_pending`.
 *In this project:* the shock absorber. A spike makes lag rise, then drain; it's monitored at
 `localhost:8222/jsz`.
+
+### Coordinated omission
+
+A load-testing trap: if the test waits for each response before sending the next request, a
+slow server receives fewer requests exactly when it's struggling, and the results look better
+than reality. Twilio doesn't wait for you, so neither should the test.
+*In this project:* avoided by using an [arrival rate](#arrival-rate).
 
 ### Dead-letter queue
 
@@ -165,6 +180,11 @@ Our name for the JSON event built from one webhook: channel, provider ID, from, 
 time and all original parameters.
 *In this project:* `internal/envelope`; schema in [design section 6](design.md#6-event-schema).
 
+### Executor
+
+How [k6](#k6) schedules work in a scenario: for example, a fixed number of
+[virtual users](#virtual-user), or a target [arrival rate](#arrival-rate).
+
 ### Fetch
 
 A [pull consumer](#pull-consumer) asking JetStream for the next batch of messages.
@@ -186,6 +206,12 @@ An operation is idempotent if doing it twice has the same effect as doing it onc
 The persistence layer built into the NATS server. It adds [streams](#stream) (stored messages),
 [consumers](#consumer) (tracked progress) and [acks](#ack) to plain [NATS](#nats).
 *In this project:* enabled with `nats-server -js`.
+
+### k6
+
+A free, open-source load-testing tool. Test scripts are written in JavaScript; k6 itself is a
+single Go binary.
+*In this project:* `loadtest/spike.js`, run by `loadtest/run.sh`.
 
 ### MaxDeliver
 
@@ -228,6 +254,14 @@ Counters JetStream reports for a [consumer](#consumer):
 *Gotcha:* `num_redelivered` drops back to 0 once those messages are acked, so it can't tell you
 afterwards whether retries happened. Use the consumer's total deliveries instead.
 
+### Percentile
+
+The value below which a given share of measurements fall. **p50** (the median): half of requests
+were faster. **p99**: 99% were faster, so 1 in 100 was slower. Tail percentiles (p95, p99) matter
+more than the average, because a slow tail is what users and webhook senders actually hit.
+*In this project:* the target is edge p99 under 50 ms at 1,000 req/s; measured values are in
+[benchmarks](benchmarks.md).
+
 ### Poison message
 
 A message that fails every time it's processed, e.g. corrupted data. Retrying it forever wastes
@@ -254,6 +288,12 @@ simply asks less often.
 
 JetStream sending a message again, after a [nak](#nak) or when [AckWait](#ackwait) expires.
 
+### Spike test
+
+A load test that ramps traffic up sharply, holds it, and drops it again, to see how a system
+copes with a sudden burst and how it recovers.
+*In this project:* `./loadtest/run.sh`; results in [benchmarks](benchmarks.md).
+
 ### Stream
 
 A named, stored sequence of messages captured from one or more [subjects](#subject), with limits
@@ -273,6 +313,15 @@ success. The message stays in the stream.
 *In this project:* used right after a message is copied to the
 [dead-letter queue](#dead-letter-queue).
 
+### Throughput
+
+How much work a system completes per unit of time, e.g. messages processed per second. Not the
+same as latency: a system can answer each request quickly (low latency) while doing less total
+work per second than is arriving (lower throughput), which is exactly when lag builds up.
+*In this project:* in the spike test the edge accepts webhooks faster than the attribution
+consumer processes them, so lag grows during the spike and drains afterwards; see
+[benchmarks](benchmarks.md).
+
 ### Tracking number
 
 A phone number assigned to one marketing campaign, so a call to it shows which campaign
@@ -283,6 +332,11 @@ produced it.
 
 Twilio's XML instructions telling it what to do next, returned in the webhook response, e.g.
 `<Response><Dial>…</Dial></Response>` to forward a call.
+
+### Virtual user
+
+A simulated client in a load test that runs the test script in a loop. Often shortened to
+**VU**. With an [arrival rate](#arrival-rate), k6 adds VUs as needed to keep the rate up.
 
 ### Webhook
 

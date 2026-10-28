@@ -6,3 +6,6 @@ data/
 
 # Local secrets; see .env.example
 .env
+
+# Spike test output; results worth keeping go in docs/plan-m1.md
+loadtest/results/
