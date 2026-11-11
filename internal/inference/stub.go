@@ -10,7 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/envelope"
+	"github.com/cferrante/call-event-pipeline/internal/envelope"
 )
 
 // ErrOverloaded means the model had too many calls in flight to answer within its timeout.

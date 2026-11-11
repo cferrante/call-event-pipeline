@@ -9,7 +9,7 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/envelope"
+	"github.com/cferrante/call-event-pipeline/internal/envelope"
 )
 
 const (

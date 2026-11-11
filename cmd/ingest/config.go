@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/env"
-	"github.com/cferrante/decoupled-ingestion-layer/internal/envelope"
+	"github.com/cferrante/call-event-pipeline/internal/env"
+	"github.com/cferrante/call-event-pipeline/internal/envelope"
 )
 
 const defaultPort = 8080

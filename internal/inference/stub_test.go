@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/envelope"
+	"github.com/cferrante/call-event-pipeline/internal/envelope"
 )
 
 // fakeClock records each delay the stub asks for. While held, sleeps block until released,

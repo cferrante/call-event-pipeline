@@ -9,9 +9,9 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/env"
-	"github.com/cferrante/decoupled-ingestion-layer/internal/migrate"
-	"github.com/cferrante/decoupled-ingestion-layer/migrations"
+	"github.com/cferrante/call-event-pipeline/internal/env"
+	"github.com/cferrante/call-event-pipeline/internal/migrate"
+	"github.com/cferrante/call-event-pipeline/migrations"
 )
 
 func main() {

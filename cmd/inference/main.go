@@ -15,11 +15,11 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/consumer"
-	"github.com/cferrante/decoupled-ingestion-layer/internal/inference"
-	"github.com/cferrante/decoupled-ingestion-layer/internal/migrate"
-	"github.com/cferrante/decoupled-ingestion-layer/internal/stream"
-	"github.com/cferrante/decoupled-ingestion-layer/migrations"
+	"github.com/cferrante/call-event-pipeline/internal/consumer"
+	"github.com/cferrante/call-event-pipeline/internal/inference"
+	"github.com/cferrante/call-event-pipeline/internal/migrate"
+	"github.com/cferrante/call-event-pipeline/internal/stream"
+	"github.com/cferrante/call-event-pipeline/migrations"
 )
 
 func main() {

@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/twilio"
+	"github.com/cferrante/call-event-pipeline/internal/twilio"
 )
 
 func baseOptions() options {

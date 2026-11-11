@@ -12,8 +12,8 @@ import (
 	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/envelope"
-	"github.com/cferrante/decoupled-ingestion-layer/internal/natstest"
+	"github.com/cferrante/call-event-pipeline/internal/envelope"
+	"github.com/cferrante/call-event-pipeline/internal/natstest"
 )
 
 func setup(t *testing.T) (context.Context, jetstream.JetStream) {

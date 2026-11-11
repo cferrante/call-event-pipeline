@@ -14,11 +14,11 @@ import (
 
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/attribution"
-	"github.com/cferrante/decoupled-ingestion-layer/internal/dbtest"
-	"github.com/cferrante/decoupled-ingestion-layer/internal/envelope"
-	"github.com/cferrante/decoupled-ingestion-layer/internal/natstest"
-	"github.com/cferrante/decoupled-ingestion-layer/internal/stream"
+	"github.com/cferrante/call-event-pipeline/internal/attribution"
+	"github.com/cferrante/call-event-pipeline/internal/dbtest"
+	"github.com/cferrante/call-event-pipeline/internal/envelope"
+	"github.com/cferrante/call-event-pipeline/internal/natstest"
+	"github.com/cferrante/call-event-pipeline/internal/stream"
 )
 
 // fakeRecorder fails the first failures calls, optionally sleeping on the first call.

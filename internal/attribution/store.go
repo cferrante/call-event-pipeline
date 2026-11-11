@@ -10,7 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/envelope"
+	"github.com/cferrante/call-event-pipeline/internal/envelope"
 )
 
 // Store writes interactions and leads to Postgres.

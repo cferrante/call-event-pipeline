@@ -12,7 +12,7 @@ import (
 	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/dbtest"
+	"github.com/cferrante/call-event-pipeline/internal/dbtest"
 )
 
 var received = time.Date(2026, 10, 28, 12, 0, 0, 0, time.UTC)

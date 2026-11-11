@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/env"
-	"github.com/cferrante/decoupled-ingestion-layer/internal/inference"
+	"github.com/cferrante/call-event-pipeline/internal/env"
+	"github.com/cferrante/call-event-pipeline/internal/inference"
 )
 
 // config is the inference service's settings, read from environment variables.

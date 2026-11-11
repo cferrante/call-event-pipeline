@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/envelope"
+	"github.com/cferrante/call-event-pipeline/internal/envelope"
 )
 
 // insightStore is the part of Store the recorder needs; tests replace it.
