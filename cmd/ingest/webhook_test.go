@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/envelope"
-	"github.com/cferrante/decoupled-ingestion-layer/internal/twilio"
+	"github.com/cferrante/call-event-pipeline/internal/envelope"
+	"github.com/cferrante/call-event-pipeline/internal/twilio"
 )
 
 const (

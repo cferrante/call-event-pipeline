@@ -28,9 +28,9 @@ import (
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go/jetstream"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/dbtest"
-	"github.com/cferrante/decoupled-ingestion-layer/internal/natstest"
-	"github.com/cferrante/decoupled-ingestion-layer/internal/twilio"
+	"github.com/cferrante/call-event-pipeline/internal/dbtest"
+	"github.com/cferrante/call-event-pipeline/internal/natstest"
+	"github.com/cferrante/call-event-pipeline/internal/twilio"
 )
 
 const authToken = "e2e-token"

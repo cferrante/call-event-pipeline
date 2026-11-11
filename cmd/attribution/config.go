@@ -3,7 +3,7 @@ package main
 import (
 	"log/slog"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/env"
+	"github.com/cferrante/call-event-pipeline/internal/env"
 )
 
 // config is the attribution service's settings, read from environment variables.

@@ -12,8 +12,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/dbtest"
-	"github.com/cferrante/decoupled-ingestion-layer/internal/envelope"
+	"github.com/cferrante/call-event-pipeline/internal/dbtest"
+	"github.com/cferrante/call-event-pipeline/internal/envelope"
 )
 
 const (

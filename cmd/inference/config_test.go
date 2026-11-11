@@ -5,7 +5,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/cferrante/decoupled-ingestion-layer/internal/inference"
+	"github.com/cferrante/call-event-pipeline/internal/inference"
 )
 
 func setValidEnv(t *testing.T) {

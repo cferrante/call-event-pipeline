@@ -1,4 +1,4 @@
-module github.com/cferrante/decoupled-ingestion-layer
+module github.com/cferrante/call-event-pipeline
 
 go 1.27.1
 

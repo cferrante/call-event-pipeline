@@ -1,4 +1,4 @@
-# Decoupled lead ingestion layer
+# Call event pipeline
 
 Real-time ingestion for inbound voice and SMS leads: every call and text is captured and
 attributed to its marketing campaign within milliseconds, and the system absorbs large spikes
