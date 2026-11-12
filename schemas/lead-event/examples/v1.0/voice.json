@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "channel": "voice",
+  "provider": "twilio",
+  "provider_id": "CA0123456789abcdef0123456789abcdef",
+  "from": "+14155550100",
+  "to": "+18005550001",
+  "received_at": "2026-10-27T12:00:00.123Z",
+  "params": {
+    "CallSid": ["CA0123456789abcdef0123456789abcdef"],
+    "From": ["+14155550100"],
+    "To": ["+18005550001"],
+    "CallStatus": ["ringing"]
+  }
+}

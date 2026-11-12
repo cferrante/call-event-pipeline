@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "channel": "voice",
+  "provider": "twilio",
+  "provider_id": "CA00000000000000000000000000000001",
+  "from": "Anonymous",
+  "to": "+18005550001",
+  "received_at": "2026-10-27T12:00:02Z",
+  "params": {
+    "CallSid": ["CA00000000000000000000000000000001"],
+    "From": ["Anonymous"],
+    "To": ["+18005550001"]
+  },
+  "added_by_a_future_minor_version": {"consumers": "must ignore this"}
+}

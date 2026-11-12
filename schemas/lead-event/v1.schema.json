@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Lead event, major version 1",
+  "description": "One inbound interaction (a call or SMS) exactly as received from the provider, published to the LEADS stream on leads.raw.<channel>. Minor versions only add: consumers must ignore fields they don't know, and must dead-letter a schema_version or channel they don't support rather than guess. Examples for every minor version are in examples/.",
+  "type": "object",
+  "required": ["schema_version", "channel", "provider", "provider_id", "from", "to", "received_at", "params"],
+  "additionalProperties": true,
+  "properties": {
+    "schema_version": {
+      "description": "Major version of this schema. A breaking change publishes a new major version alongside this one.",
+      "const": 1
+    },
+    "channel": {
+      "description": "How the lead contacted us; also the last token of the subject.",
+      "enum": ["voice", "sms"]
+    },
+    "provider": {
+      "description": "Who sent the webhook.",
+      "type": "string",
+      "minLength": 1
+    },
+    "provider_id": {
+      "description": "The provider's unique ID for the interaction (Twilio CallSid or MessageSid). Also the message's Nats-Msg-Id, so provider retries are deduplicated.",
+      "type": "string",
+      "minLength": 1
+    },
+    "from": {
+      "description": "The caller or sender as the provider sent it. Usually E.164, but may be empty or a word such as Anonymous when caller ID is withheld.",
+      "type": "string"
+    },
+    "to": {
+      "description": "The tracking number contacted, which identifies the campaign.",
+      "type": "string",
+      "minLength": 1
+    },
+    "received_at": {
+      "description": "When the edge received the webhook, RFC 3339 in UTC.",
+      "type": "string",
+      "format": "date-time"
+    },
+    "params": {
+      "description": "Every original form parameter, kept so events can be replayed and reprocessed. Values are lists because a form parameter may repeat.",
+      "type": "object",
+      "additionalProperties": {
+        "type": "array",
+        "items": {"type": "string"}
+      }
+    }
+  }
+}
