@@ -102,17 +102,27 @@ demos, alert emails go to `cmd/mailsink`, a stand-in for SendGrid's Mail Send AP
   must stay static and instant (e.g. `<Dial>` to a configured number). The edge never waits
   on attribution or AI to decide call routing.
 - **Email (M3)** follows SendGrid's Inbound Parse contract: a `multipart/form-data` POST with
-  `from`, `to`, `subject`, `text`, `headers` and an `envelope` JSON field.
-  - Body cap 1 MB. Attachments are not kept: the envelope records only their count, which keeps
-    the stream small and keeps attachment content (often PII) out of it.
-  - The request must carry a valid **ECDSA signature** from SendGrid's security policy
-    (signature and timestamp headers, verified with SendGrid's public key from env).
-    Invalid → `403`. Timestamps older than 5 minutes are rejected, so a captured request can't
-    be replayed later. Exact header names are confirmed against Twilio's API reference when
-    built.
-  - `provider_id` is the email's `Message-ID` header, the email equivalent of a `MessageSid`,
-    so provider retries dedupe exactly as for SMS. A message without one is rejected with
-    `400`, since it couldn't be deduplicated.
+  `from`, `to`, `subject`, `text`, `html`, `headers` (the raw header text), `envelope` (JSON)
+  and attachment file parts.
+  - **Size:** SendGrid accepts emails up to 30 MB with attachments, so the edge accepts that
+    much rather than rejecting (and losing) a lead who attached a file. The body is
+    **streamed**: attachment parts are read and discarded without being buffered, while every
+    byte still feeds the signature hash. Text fields are capped (64 KB each) and the envelope
+    records only the attachment count, which keeps the stream small and attachment content
+    (often PII) out of it.
+  - **Signature:** SendGrid's security policy signs with ECDSA (P-256) over SHA-256 of the
+    `X-Twilio-Email-Event-Webhook-Timestamp` header's bytes followed by the raw body, and sends
+    the base64 ASN.1 signature in `X-Twilio-Email-Event-Webhook-Signature`. The public key
+    (base64 DER) comes from env. Invalid → `403`. The timestamp must be all digits: with no
+    separator in the signed bytes, that stops body bytes being shifted into it.
+  - **No freshness window.** SendGrid documents no timestamp tolerance and doesn't say whether
+    a retried delivery is re-signed, so rejecting old timestamps could drop a legitimate retry.
+    A replayed request can only resend an email that was already accepted, and `Message-ID`
+    deduplication makes that a no-op.
+  - `provider_id` is the email's `Message-ID`, parsed from the raw `headers` field (Inbound
+    Parse has no dedicated field), the email equivalent of a `MessageSid`, so provider retries
+    dedupe exactly as for SMS. A message without one is rejected with `400`, since it couldn't
+    be deduplicated.
 
 ### 5.2 JetStream configuration
 
