@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "channel": "sms",
+  "provider": "twilio",
+  "provider_id": "SM0123456789abcdef0123456789abcdef",
+  "from": "+14155550101",
+  "to": "+18005550002",
+  "received_at": "2026-10-27T12:00:01Z",
+  "params": {
+    "MessageSid": ["SM0123456789abcdef0123456789abcdef"],
+    "From": ["+14155550101"],
+    "To": ["+18005550002"],
+    "Body": ["what's the price?"]
+  }
+}
