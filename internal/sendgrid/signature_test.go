@@ -126,3 +126,36 @@ func TestParsePublicKey(t *testing.T) {
 		}
 	}
 }
+
+// The simulator's private key travels in .env as base64 PKCS#8 DER, the form
+// `openssl genpkey ... -outform DER | base64` writes.
+func TestParsePrivateKey(t *testing.T) {
+	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatal(err)
+	}
+	der, err := x509.MarshalPKCS8PrivateKey(priv)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := ParsePrivateKey(base64.StdEncoding.EncodeToString(der))
+	if err != nil {
+		t.Fatalf("ParsePrivateKey: %v", err)
+	}
+	pubDER, _ := x509.MarshalPKIXPublicKey(&priv.PublicKey)
+	if s.PublicKeyBase64() != base64.StdEncoding.EncodeToString(pubDER) {
+		t.Error("loaded signer has a different public key")
+	}
+
+	p384, _ := ecdsa.GenerateKey(elliptic.P384(), rand.Reader)
+	der384, _ := x509.MarshalPKCS8PrivateKey(p384)
+	for name, in := range map[string]string{
+		"P-384 key": base64.StdEncoding.EncodeToString(der384),
+		"not a key": base64.StdEncoding.EncodeToString([]byte("nope")),
+		"empty":     "",
+	} {
+		if _, err := ParsePrivateKey(in); err == nil {
+			t.Errorf("%s: accepted, want an error", name)
+		}
+	}
+}

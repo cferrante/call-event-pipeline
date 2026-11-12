@@ -11,6 +11,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"mime/multipart"
 	"net"
 	"net/http"
 	"net/url"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/cferrante/call-event-pipeline/internal/dbtest"
 	"github.com/cferrante/call-event-pipeline/internal/natstest"
+	"github.com/cferrante/call-event-pipeline/internal/sendgrid"
 	"github.com/cferrante/call-event-pipeline/internal/twilio"
 )
 
@@ -139,6 +141,7 @@ type env struct {
 	js             jetstream.JetStream
 	db             *pgxpool.Pool
 	ingestPort     int
+	sendgrid       *sendgrid.Signer // plays SendGrid; ingest trusts its public key
 }
 
 func setup(t *testing.T) env {
@@ -149,7 +152,12 @@ func setup(t *testing.T) env {
 		t.Fatalf("jetstream: %v", err)
 	}
 	db := dbtest.Empty(t) // the services apply migrations themselves
-	return env{natsURL: nc.ConnectedUrl(), dbURL: db.Config().ConnString(), js: js, db: db, ingestPort: freePort(t)}
+	signer, err := sendgrid.NewSigner()
+	if err != nil {
+		t.Fatalf("sendgrid signer: %v", err)
+	}
+	return env{natsURL: nc.ConnectedUrl(), dbURL: db.Config().ConnString(), js: js, db: db,
+		ingestPort: freePort(t), sendgrid: signer}
 }
 
 func (e env) publicURL() string { return "http://127.0.0.1:" + strconv.Itoa(e.ingestPort) }
@@ -160,6 +168,7 @@ func (e env) startIngest(t *testing.T) *process {
 		"INGEST_PORT="+strconv.Itoa(e.ingestPort),
 		"INGEST_PUBLIC_URL="+e.publicURL(),
 		"TWILIO_AUTH_TOKEN="+authToken,
+		"SENDGRID_PUBLIC_KEY="+e.sendgrid.PublicKeyBase64(),
 		"NATS_URL="+e.natsURL,
 	)
 	eventually(t, "ingest to serve /healthz", func() bool {
@@ -222,6 +231,41 @@ func (e env) send(t *testing.T, channel string, form url.Values) int {
 	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Fatalf("send %s webhook: %v", channel, err)
+	}
+	resp.Body.Close()
+	return resp.StatusCode
+}
+
+// sendEmail posts an Inbound Parse email signed as SendGrid would sign it, returning the
+// status code.
+func (e env) sendEmail(t *testing.T, messageID, from, to, subject, text string) int {
+	t.Helper()
+	var buf bytes.Buffer
+	w := multipart.NewWriter(&buf)
+	for _, f := range [][2]string{
+		{"from", from}, {"to", to}, {"subject", subject}, {"text", text},
+		{"headers", "Message-ID: " + messageID + "\nSubject: " + subject + "\n"},
+		{"envelope", fmt.Sprintf(`{"to":[%q],"from":%q}`, to, from)},
+	} {
+		if err := w.WriteField(f[0], f[1]); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	body := buf.Bytes()
+	req, err := http.NewRequest(http.MethodPost, e.publicURL()+"/webhooks/sendgrid/inbound", bytes.NewReader(body))
+	if err != nil {
+		t.Fatalf("new request: %v", err)
+	}
+	ts := strconv.FormatInt(time.Now().Unix(), 10)
+	req.Header.Set("Content-Type", w.FormDataContentType())
+	req.Header.Set(sendgrid.HeaderTimestamp, ts)
+	req.Header.Set(sendgrid.HeaderSignature, e.sendgrid.Sign(ts, body))
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("send email: %v", err)
 	}
 	resp.Body.Close()
 	return resp.StatusCode
@@ -403,4 +447,41 @@ func TestInferenceResetConsumer(t *testing.T) {
 		return err == nil && c.CachedInfo().Config.DeliverPolicy == jetstream.DeliverNewPolicy
 	})
 	inference.stop(t)
+}
+
+// An email lead travels the same path as a call: signed webhook, stream, attribution to its
+// campaign through a tracking address, and an insight from its subject and text. A retried
+// delivery (same Message-ID) is stored once.
+func TestEmailBecomesAttributedInteractionAndInsight(t *testing.T) {
+	e := setup(t)
+	attribution := e.startAttribution(t)
+	if _, err := e.db.Exec(context.Background(),
+		`INSERT INTO tracking_addresses (address, campaign_id, source) VALUES ('search-fall@leads.example.com', 'search-fall', 'google')`,
+	); err != nil {
+		t.Fatalf("seed tracking address: %v", err)
+	}
+	inference := e.startInference(t)
+	ingest := e.startIngest(t)
+
+	for range 2 {
+		if code := e.sendEmail(t, "<e2e1@example.net>", "jordan@example.net", "Search-Fall@leads.example.com",
+			"What's the price?", "For a new roof."); code != http.StatusOK {
+			t.Fatalf("email status = %d, want 200", code)
+		}
+	}
+
+	eventually(t, "the email to be attributed", func() bool {
+		return e.count(t, `SELECT count(*) FROM interactions WHERE provider_id = '<e2e1@example.net>'
+			AND channel = 'email' AND campaign_id = 'search-fall' AND lead_id IS NULL`) == 1
+	})
+	eventually(t, "the email's insight", func() bool {
+		return e.count(t, `SELECT count(*) FROM insights WHERE provider_id = '<e2e1@example.net>' AND intent = 'sales'`) == 1
+	})
+	if n := e.count(t, "SELECT count(*) FROM interactions"); n != 1 {
+		t.Errorf("interactions = %d, want 1: the retried email must be deduplicated", n)
+	}
+
+	ingest.stop(t)
+	inference.stop(t)
+	attribution.stop(t)
 }

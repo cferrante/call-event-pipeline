@@ -1,6 +1,7 @@
 package main
 
 import (
+	"crypto/ecdsa"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -11,6 +12,7 @@ import (
 
 	"github.com/cferrante/call-event-pipeline/internal/env"
 	"github.com/cferrante/call-event-pipeline/internal/envelope"
+	"github.com/cferrante/call-event-pipeline/internal/sendgrid"
 )
 
 const defaultPort = 8080
@@ -22,6 +24,9 @@ type config struct {
 	publicURL string // INGEST_PUBLIC_URL, without a trailing slash
 	natsURL   string // NATS_URL
 	forwardTo string // INGEST_FORWARD_TO, optional
+	// sendgridKey verifies Inbound Parse signatures (SENDGRID_PUBLIC_KEY, optional). Without
+	// it the email route is off.
+	sendgridKey *ecdsa.PublicKey
 }
 
 // loadConfig reads and validates the environment, so a mistake stops the service at
@@ -46,6 +51,11 @@ func loadConfig() (config, error) {
 	if cfg.forwardTo != "" && !envelope.IsE164(cfg.forwardTo) {
 		return config{}, fmt.Errorf("INGEST_FORWARD_TO must be an E.164 number like +14158675310, got %q", cfg.forwardTo)
 	}
+	if raw := os.Getenv("SENDGRID_PUBLIC_KEY"); raw != "" {
+		if cfg.sendgridKey, err = sendgrid.ParsePublicKey(raw); err != nil {
+			return config{}, fmt.Errorf("SENDGRID_PUBLIC_KEY: %w", err)
+		}
+	}
 	return cfg, nil
 }
 
@@ -67,6 +77,7 @@ func (c config) LogValue() slog.Value {
 		slog.String("public_url", c.publicURL),
 		slog.String("nats_url", c.natsURL),
 		slog.String("forward_to", c.forwardTo),
+		slog.Bool("email_enabled", c.sendgridKey != nil),
 	)
 }
 

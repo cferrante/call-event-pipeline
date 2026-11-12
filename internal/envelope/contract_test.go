@@ -37,4 +37,22 @@ func TestPublishedEnvelopesMatchTheSchema(t *testing.T) {
 			t.Errorf("%s: published envelope violates the schema: %v\n%s", name, err, data)
 		}
 	}
+
+	email, err := envelope.FromInboundEmail(url.Values{
+		"from":     {"Jordan Lee <jordan@example.net>"},
+		"subject":  {"Quote?"},
+		"text":     {"price please"},
+		"headers":  {"Message-ID: <m1@example.net>\n"},
+		"envelope": {`{"to":["search-fall@leads.example.com"],"from":"jordan@example.net"}`},
+	}, 3, at)
+	if err != nil {
+		t.Fatalf("email: build envelope: %v", err)
+	}
+	data, err := json.Marshal(email)
+	if err != nil {
+		t.Fatalf("email: marshal: %v", err)
+	}
+	if err := contract.Validate(sch, data); err != nil {
+		t.Errorf("email: published envelope violates the schema: %v\n%s", err, data)
+	}
 }
