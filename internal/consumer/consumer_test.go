@@ -128,20 +128,36 @@ func (h harness) publishRaw(t *testing.T, data string) {
 	}
 }
 
-// waitSettled waits until the consumer has no unprocessed or unacknowledged messages.
+// waitSettled waits until the consumer has acknowledged (or terminated) every message up to
+// the stream's last one.
+//
+// It compares the consumer's ack floor with the stream's last sequence rather than trusting
+// NumPending == 0 alone: JetStream updates a consumer's pending count asynchronously after a
+// publish, so under CPU contention it can briefly read 0 while messages are still undelivered
+// (seen in CI: 7 of 10 delivered when this returned).
 func (h harness) waitSettled(t *testing.T) *jetstream.ConsumerInfo {
 	t.Helper()
+	s, err := h.js.Stream(h.ctx, stream.StreamName)
+	if err != nil {
+		t.Fatalf("stream %s: %v", stream.StreamName, err)
+	}
+	sinfo, err := s.Info(h.ctx)
+	if err != nil {
+		t.Fatalf("stream info: %v", err)
+	}
+	last := sinfo.State.LastSeq
 	deadline := time.Now().Add(10 * time.Second)
 	for {
 		info, err := h.cons.Info(h.ctx)
 		if err != nil {
 			t.Fatalf("consumer info: %v", err)
 		}
-		if info.NumPending == 0 && info.NumAckPending == 0 && info.Delivered.Stream > 0 {
+		if last > 0 && info.AckFloor.Stream >= last && info.NumAckPending == 0 && info.NumPending == 0 {
 			return info
 		}
 		if time.Now().After(deadline) {
-			t.Fatalf("consumer did not settle: pending=%d ack_pending=%d", info.NumPending, info.NumAckPending)
+			t.Fatalf("consumer did not settle: ack floor %d of %d, pending=%d ack_pending=%d",
+				info.AckFloor.Stream, last, info.NumPending, info.NumAckPending)
 		}
 		time.Sleep(20 * time.Millisecond)
 	}
