@@ -305,6 +305,17 @@ real inbox moment is wanted in the demo; about $0.10 per 1,000 emails, checked f
   wiring it up caught this. `env-setup.sh` converts with `openssl pkcs8 -topk8`, and a test
   runs the script and checks the pair it writes.
 
+- **Step 7: the volume rule's baseline is a median.** The spec compared the recent rate with
+  the trailing hour's mean. A test of a 5-minute burst at 1,000/s (the step-up benchmark's
+  kind of load) showed the mean-based rule raising a false alert afterwards; the median of
+  per-minute rates doesn't. The recorded 70-second M2 spike alone was not enough to show this,
+  which an earlier estimate here had wrongly assumed: over a full hour it only doubles the
+  mean, so the sustained-burst test is what proves the choice.
+- **Step 7: rules are tested against a simulator, not recorded data.** `loadtest/results/` is
+  git-ignored, so the M2 run's samples aren't in the repo. A small model of the pipeline
+  (arrival rate, per-consumer capacity) reproduces the recorded shape, and a test checks it
+  does: inference lag peaks above 40,000, as measured (45,642).
+
 ## Code-review outcomes
 
 None yet.

@@ -409,7 +409,7 @@ a failure.
 | Rule | Detects | Fires when |
 |---|---|---|
 | **Arrivals stopped** | The edge or the provider is down | No **canary** row for 30 s. A canary is a signed synthetic voice webhook sent every 10 s from a reserved number to a reserved tracking number; reports exclude it. |
-| **Volume drop** | A partial outage upstream | The last 5 minutes' arrival rate is below 20% of the trailing hour's, and the trailing hour averaged at least 1/s |
+| **Volume drop** | A partial outage upstream | The last 5 minutes' arrival rate is below 20% of normal, where normal is the **median** of the per-minute rates over the hour before, and is at least 1/s. The median, not the mean: a sustained burst lifts an hour's mean several-fold, so ordinary traffic afterwards would look like an outage |
 | **Acked but not written** | A consumer that stays up and acknowledges messages without writing them | Over 60 s, rows written are below 90% of messages the consumer acknowledged (from its ack floor), with at least 100 acknowledged |
 | **Stale backlog** | A consumer falling too far behind | The oldest pending message is more than 5 minutes old |
 
