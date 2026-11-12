@@ -126,3 +126,22 @@ func TestRecordReturnsErrors(t *testing.T) {
 		})
 	}
 }
+
+// An email is classified from its subject and text together, so a question asked only in
+// the subject line still counts.
+func TestRecordClassifiesEmailFromSubjectAndText(t *testing.T) {
+	model, store := &fakeModel{}, &fakeStore{}
+	env := envelope.Envelope{
+		SchemaVersion: envelope.SchemaVersion, Channel: envelope.Email, Provider: "sendgrid",
+		ProviderID: "<m1@example.net>", From: "jordan@example.net", To: "search-fall@leads.example.com",
+		ReceivedAt: receivedAt, Subject: "Price for a roof?",
+		Params: url.Values{"subject": {"Price for a roof?"}, "text": {"Photo attached."}},
+	}
+	if _, err := newTestRecorder(model, store).Record(context.Background(), env); err != nil {
+		t.Fatalf("Record: %v", err)
+	}
+	want := Input{Channel: envelope.Email, Body: "Price for a roof?\n\nPhoto attached."}
+	if len(model.inputs) != 1 || model.inputs[0] != want {
+		t.Errorf("model inputs = %+v, want %+v", model.inputs, want)
+	}
+}

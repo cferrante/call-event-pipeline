@@ -1,9 +1,18 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "title": "Lead event, major version 1",
-  "description": "One inbound interaction (a call or SMS) exactly as received from the provider, published to the LEADS stream on leads.raw.<channel>. Minor versions only add: consumers must ignore fields they don't know, and must dead-letter a schema_version or channel they don't support rather than guess. Examples for every minor version are in examples/.",
+  "description": "One inbound interaction (a call, SMS or, from 1.1, an email) exactly as received from the provider, published to the LEADS stream on leads.raw.<channel>. Minor versions only add: consumers must ignore fields they don't know, and must dead-letter a schema_version or channel they don't support rather than guess. Examples for every minor version are in examples/.",
   "type": "object",
-  "required": ["schema_version", "channel", "provider", "provider_id", "from", "to", "received_at", "params"],
+  "required": [
+    "schema_version",
+    "channel",
+    "provider",
+    "provider_id",
+    "from",
+    "to",
+    "received_at",
+    "params"
+  ],
   "additionalProperties": true,
   "properties": {
     "schema_version": {
@@ -11,8 +20,12 @@
       "const": 1
     },
     "channel": {
-      "description": "How the lead contacted us; also the last token of the subject.",
-      "enum": ["voice", "sms"]
+      "description": "How the lead contacted us; also the last token of the subject. email was added in 1.1: a consumer that does not support it must dead-letter it.",
+      "enum": [
+        "voice",
+        "sms",
+        "email"
+      ]
     },
     "provider": {
       "description": "Who sent the webhook.",
@@ -20,16 +33,16 @@
       "minLength": 1
     },
     "provider_id": {
-      "description": "The provider's unique ID for the interaction (Twilio CallSid or MessageSid). Also the message's Nats-Msg-Id, so provider retries are deduplicated.",
+      "description": "The provider's unique ID for the interaction: Twilio's CallSid or MessageSid, or an email's Message-ID header. Also the message's Nats-Msg-Id, so provider retries are deduplicated.",
       "type": "string",
       "minLength": 1
     },
     "from": {
-      "description": "The caller or sender as the provider sent it. Usually E.164, but may be empty or a word such as Anonymous when caller ID is withheld.",
+      "description": "The caller or sender as the provider sent it. For calls and SMS usually E.164, but may be empty or a word such as Anonymous when caller ID is withheld; for email, the sender's address.",
       "type": "string"
     },
     "to": {
-      "description": "The tracking number contacted, which identifies the campaign.",
+      "description": "The tracking number (or, for email, tracking address) contacted, which identifies the campaign.",
       "type": "string",
       "minLength": 1
     },
@@ -43,8 +56,19 @@
       "type": "object",
       "additionalProperties": {
         "type": "array",
-        "items": {"type": "string"}
+        "items": {
+          "type": "string"
+        }
       }
+    },
+    "subject": {
+      "description": "Email only (1.1): the subject line.",
+      "type": "string"
+    },
+    "attachment_count": {
+      "description": "Email only (1.1): how many attachments the email had. Their content is not kept.",
+      "type": "integer",
+      "minimum": 0
     }
   }
 }

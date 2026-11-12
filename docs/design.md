@@ -347,9 +347,11 @@ insights         (id PK, provider_id UNIQUE, intent, score, model_version, model
 tracking_addresses (address PK, campaign_id, source, medium, active)          -- M3
 ```
 
-M3 changes to `interactions`: `channel` also allows `email`; `to_e164` becomes nullable and a
-nullable `to_address` holds the tracking address an email was sent to; `from_number` holds the
-sender for every channel and is renamed `from_contact`.
+M3 changes to `interactions` (migration `0006`, additive only): `channel` also allows
+`email`; `to_e164` becomes nullable and a nullable `to_address` holds the lowercased tracking
+address an email was sent to, with a check that exactly one of the two is set. `from_number`
+keeps its name and holds the sender's address for email: renaming it would break instances
+of the old code still running during a deploy, which a cosmetic change doesn't justify.
 
 - `interactions` is the record of facts: one row per inbound call/SMS, with the campaign
   current *at the time*, never rewritten. Any attribution model (multi-touch included) can be

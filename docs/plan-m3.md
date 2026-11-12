@@ -93,8 +93,7 @@ On branch `m3-spec`; merged before any code. The spec changes are in
 ### Step 6: Attribute and classify email (integration)
 
 - Migration `0006`: `tracking_addresses`; `interactions.channel` allows `email`; `to_e164`
-  nullable; `to_address`; `from_number` renamed `from_contact`. The conversations view
-  updated to match.
+  nullable; `to_address`. (`from_number` is not renamed; see deviations.)
 - Attribution looks up email in `tracking_addresses`; no lead for email senders. Inference
   classifies subject and text.
 - Tests first: an email is attributed to its campaign; an unknown address is `unknown`; an
@@ -284,6 +283,18 @@ real inbox moment is wanted in the demo; about $0.10 per 1,000 emails, checked f
   discarding attachment parts unbuffered while hashing every byte for the signature.
 - **Step 5: `Message-ID` comes from the raw `headers` field,** as Inbound Parse has no
   dedicated field.
+
+- **Steps 5 and 6 swapped: consumers before the producer.** Publishing schema 1.1 adds an
+  email example, and the consumer contract tests (step 3) require every published example to
+  be processed, so they failed until attribution and inference supported email: the
+  contract blocked releasing the producer change first, which is its job. Step 6 (schema 1.1,
+  migration, email attribution and classification) therefore ships first and step 5 (the edge
+  route and `sendhook`) second, the safe rollout order for a new event type.
+- **Step 6: `from_number` is not renamed.** Renaming a column breaks instances of the old
+  code still running during a deploy, and doing it safely needs an expand-and-contract
+  migration; for a cosmetic change that isn't worth it. Migration `0006` is additive only.
+- **Step 6: the conversations view is unchanged.** Email senders have no lead, and the view
+  already counts every lead-less interaction as its own conversation.
 
 ## Code-review outcomes
 
