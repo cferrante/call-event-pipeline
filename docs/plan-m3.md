@@ -66,9 +66,7 @@ On branch `m3-spec`; merged before any code. The spec changes are in
 - `Schema-Version` header on publish; consumers dead-letter an unsupported major version or an
   unknown channel at once, with the reason, instead of retrying it.
 - Tests first: each consumer's contract test processes every example it supports; an example
-  with `schema_version: 2`, and one with `channel: "fax"`, go to the DLQ on the first delivery
-  (today `fax` would hit the database `CHECK` and be retried five times, so the test fails for
-  the right reason).
+  with `schema_version: 2`, and one with `channel: "fax"`, go to the DLQ on the first delivery.
 - Commit: *Dead-letter unsupported schema versions and channels*.
 
 ### Step 4: SendGrid Inbound Parse signature (`internal/sendgrid`, unit)
@@ -254,6 +252,16 @@ real inbox moment is wanted in the demo; about $0.10 per 1,000 emails, checked f
   with 8 parallel runs on 2 cores (9 failures in 480 runs); the earlier local runs, on an idle
   8-core machine, never opened that window. The helper now waits until the consumer's ack
   floor reaches the stream's last sequence: 0 failures in 480 runs under the same contention.
+
+- **Step 3: the unknown-channel behaviour already existed.** The spec and this step assumed an
+  unknown channel would reach the database `CHECK` and be retried five times. In fact
+  `envelope.Parse` already rejects it as permanent, so it is dead-lettered on the first
+  delivery. The step became: the `Schema-Version` header (test failed first: header empty),
+  contract tests through the real attribution and inference stores, and tests pinning the
+  first-delivery dead letter. Those pinning tests passed on their first run, so each was
+  proven with a deliberate break: a strict JSON reader failed both stores' contract tests on
+  the unknown-field example, and retrying parse errors gave 5 deliveries instead of 1. The
+  spec's [section 6.1](design.md#61-the-schema-as-a-contract-m3) is corrected.
 
 ## Code-review outcomes
 

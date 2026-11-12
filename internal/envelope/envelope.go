@@ -12,8 +12,14 @@ import (
 	"time"
 )
 
-// SchemaVersion is the envelope format this code writes and accepts.
+// SchemaVersion is the envelope's major version, written in every event's schema_version
+// field. Consumers accept only the major versions they support.
 const SchemaVersion = 1
+
+// SchemaRelease is the full schema version this code writes, major.minor, matching a
+// release of schemas/lead-event. Minor releases only add, so it is informational: it travels
+// in the Schema-Version message header for logs and debugging, not in the body.
+const SchemaRelease = "1.0"
 
 // Channel is how the lead contacted us.
 type Channel string

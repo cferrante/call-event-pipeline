@@ -124,6 +124,10 @@ func TestPublishStoresEventOnChannelSubject(t *testing.T) {
 	if got := msg.Header.Get(nats.MsgIdHdr); got != "SM111" {
 		t.Errorf("Nats-Msg-Id = %q, want %q", got, "SM111")
 	}
+	// Consumers can log or route on the full schema release without parsing the body.
+	if got := msg.Header.Get(HeaderSchemaVersion); got != envelope.SchemaRelease {
+		t.Errorf("%s = %q, want %q", HeaderSchemaVersion, got, envelope.SchemaRelease)
+	}
 	got, err := envelope.Parse(msg.Data)
 	if err != nil {
 		t.Fatalf("stored payload does not parse: %v", err)

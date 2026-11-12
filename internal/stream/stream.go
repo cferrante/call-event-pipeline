@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/nats-io/nats.go"
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/cferrante/call-event-pipeline/internal/envelope"
@@ -39,6 +40,9 @@ func EnsureStream(ctx context.Context, js jetstream.JetStream) error {
 	return nil
 }
 
+// HeaderSchemaVersion carries envelope.SchemaRelease on every published event.
+const HeaderSchemaVersion = "Schema-Version"
+
 // Subject returns the subject events for a channel are published on.
 func Subject(ch envelope.Channel) string {
 	return subjectPrefix + string(ch)
@@ -61,7 +65,10 @@ func (p *Publisher) Publish(ctx context.Context, env envelope.Envelope) error {
 	if err != nil {
 		return fmt.Errorf("encode envelope: %w", err)
 	}
-	if _, err := p.js.Publish(ctx, Subject(env.Channel), data, jetstream.WithMsgID(env.ProviderID)); err != nil {
+	msg := nats.NewMsg(Subject(env.Channel))
+	msg.Data = data
+	msg.Header.Set(HeaderSchemaVersion, envelope.SchemaRelease)
+	if _, err := p.js.PublishMsg(ctx, msg, jetstream.WithMsgID(env.ProviderID)); err != nil {
 		return fmt.Errorf("publish %s: %w", env.ProviderID, err)
 	}
 	return nil
