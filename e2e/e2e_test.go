@@ -10,6 +10,7 @@ package e2e
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"mime/multipart"
 	"net"
@@ -37,7 +38,7 @@ import (
 
 const authToken = "e2e-token"
 
-var ingestBin, attributionBin, inferenceBin string
+var ingestBin, attributionBin, monitorBin, inferenceBin string
 
 // TestMain builds both services once for all tests.
 func TestMain(m *testing.M) {
@@ -49,8 +50,10 @@ func TestMain(m *testing.M) {
 	ingestBin = filepath.Join(dir, "ingest")
 	attributionBin = filepath.Join(dir, "attribution")
 	inferenceBin = filepath.Join(dir, "inference")
+	monitorBin = filepath.Join(dir, "monitor")
 	for bin, pkg := range map[string]string{
 		ingestBin: "../cmd/ingest", attributionBin: "../cmd/attribution", inferenceBin: "../cmd/inference",
+		monitorBin: "../cmd/monitor",
 	} {
 		if out, err := exec.Command("go", "build", "-o", bin, pkg).CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "build %s: %v\n%s", pkg, err, out)
@@ -483,5 +486,65 @@ func TestEmailBecomesAttributedInteractionAndInsight(t *testing.T) {
 
 	ingest.stop(t)
 	inference.stop(t)
+	attribution.stop(t)
+}
+
+type monitorStatus struct {
+	Healthy   bool
+	Consumers map[string]json.RawMessage
+	Active    []struct{ Rule string }
+	Recent    []struct{ State, Rule string }
+}
+
+func (e env) monitorStatus(t *testing.T, addr string) (monitorStatus, bool) {
+	t.Helper()
+	resp, err := http.Get("http://" + addr + "/status")
+	if err != nil {
+		return monitorStatus{}, false
+	}
+	defer resp.Body.Close()
+	var st monitorStatus
+	if err := json.NewDecoder(resp.Body).Decode(&st); err != nil {
+		return monitorStatus{}, false
+	}
+	return st, true
+}
+
+// The monitor's canary proves the whole path: while the edge is up the status is healthy;
+// stop the edge and "arrivals stopped" fires on the status page and in the log; bring it back
+// and the alert resolves. Intervals are shortened so the test takes seconds.
+func TestMonitorDetectsAStoppedEdgeAndRecovers(t *testing.T) {
+	e := setup(t)
+	attribution := e.startAttribution(t)
+	ingest := e.startIngest(t)
+	addr := "127.0.0.1:" + strconv.Itoa(freePort(t))
+	mon := start(t, "monitor", monitorBin,
+		"DATABASE_URL="+e.dbURL, "NATS_URL="+e.natsURL, "MONITOR_ADDR="+addr,
+		"INGEST_URL="+e.publicURL(), "INGEST_PUBLIC_URL="+e.publicURL(), "TWILIO_AUTH_TOKEN="+authToken,
+		"MONITOR_INTERVAL=200ms", "CANARY_INTERVAL=300ms", "CANARY_MAX_AGE=2s")
+
+	eventually(t, "a healthy status with the canary flowing", func() bool {
+		st, ok := e.monitorStatus(t, addr)
+		_, attr := st.Consumers["attribution"]
+		return ok && st.Healthy && attr && e.count(t, "SELECT count(*) FROM interactions WHERE from_number = 'canary'") >= 3
+	})
+
+	ingest.stop(t)
+	eventually(t, "arrivals stopped to fire", func() bool {
+		st, _ := e.monitorStatus(t, addr)
+		return len(st.Active) == 1 && st.Active[0].Rule == "arrivals_stopped" && !st.Healthy
+	})
+	if !strings.Contains(mon.out.String(), "ALERT firing") {
+		t.Error("the alert wasn't logged")
+	}
+
+	ingest = e.startIngest(t)
+	eventually(t, "the alert to resolve", func() bool {
+		st, _ := e.monitorStatus(t, addr)
+		return st.Healthy && len(st.Recent) > 0 && st.Recent[0].State == "resolved"
+	})
+
+	mon.stop(t)
+	ingest.stop(t)
 	attribution.stop(t)
 }

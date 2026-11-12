@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Pipeline monitor</title>
+<link rel="stylesheet" href="/page.css">
+</head>
+<body>
+<main>
+  <h1>Pipeline monitor</h1>
+  <div id="banner" class="banner ok">Waiting for the first reading…</div>
+  <div class="grid">
+    <div class="card"><div class="label">Arrivals</div><div class="value" id="arrivals">–</div></div>
+    <div class="card"><div class="label">Last reading</div><div class="value" id="at">–</div></div>
+  </div>
+  <section class="card scroll">
+    <div class="label">Consumers</div>
+    <table><thead><tr><th>Consumer</th><th>Lag (messages)</th><th>Oldest waiting</th><th>Written / s</th></tr></thead>
+    <tbody id="consumers"><tr><td colspan="4" class="muted">None yet</td></tr></tbody></table>
+  </section>
+  <section class="card scroll">
+    <div class="label">Alerts</div>
+    <table><thead><tr><th>State</th><th>Rule</th><th>Detail</th><th>When</th></tr></thead>
+    <tbody id="alerts"><tr><td colspan="4" class="muted">No alerts</td></tr></tbody></table>
+  </section>
+</main>
+<script src="/page.js"></script>
+</body>
+</html>

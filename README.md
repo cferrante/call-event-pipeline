@@ -52,6 +52,7 @@ nats-server -js -sd ./data/nats -m 8222   # 1. message broker, data kept in ./da
 go run ./cmd/attribution                  # 2. applies migrations, then consumes events
 go run ./cmd/inference                    # 3. classifies events with the (stub) AI model
 go run ./cmd/ingest                       # 4. webhook endpoint on $INGEST_PORT
+go run ./cmd/monitor                      # 5. alerts + status page on http://127.0.0.1:8090
 ```
 
 Stop any of them with Ctrl-C; each finishes in-flight work first.
@@ -59,6 +60,11 @@ Stop any of them with Ctrl-C; each finishes in-flight work first.
 If inference refuses to start because its consumer "already exists with a different start
 position" (one created before it started at new messages), run it once as
 `go run ./cmd/inference -reset-consumer`.
+
+The monitor sends a signed "canary" webhook every 10 seconds and alerts (in its log and on
+its status page) if the canary stops arriving, traffic drops far below normal, a consumer
+acknowledges messages without writing them, or a backlog stops draining. The page listens on
+`127.0.0.1` only, since it has no login.
 
 **Try it**
 

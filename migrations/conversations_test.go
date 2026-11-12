@@ -173,3 +173,16 @@ func TestConversationColumnsAreIndexed(t *testing.T) {
 		t.Error("no index on interactions(from_number, to_e164, campaign_id, occurred_at)")
 	}
 }
+
+// The monitor's canary webhooks (From "canary") are synthetic traffic and never appear in
+// the campaign report.
+func TestReportExcludesCanaryTraffic(t *testing.T) {
+	db := dbtest.Migrated(t)
+	message(t, db, caller, googleNo, nil, "unknown", nil, day0)
+	for i := range 3 {
+		message(t, db, "canary", "+15550100001", nil, "unknown", nil, day0.Add(time.Duration(i)*10*time.Second))
+	}
+	if got := report(t, db)["unknown"]; got != (campaignRow{1, 1}) {
+		t.Errorf("unknown = %+v, want 1 conversation and 1 interaction: canary traffic must be excluded", got)
+	}
+}

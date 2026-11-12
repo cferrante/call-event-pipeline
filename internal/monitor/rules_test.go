@@ -159,3 +159,24 @@ func TestSustainedBurstDoesNotSkewTheVolumeBaseline(t *testing.T) {
 		t.Errorf("a sustained burst fired: %s", describe(got))
 	}
 }
+
+// A consumer created after the monitor started (attribution started second, say) has no
+// reading at the start of the window; it must not be compared against zero. Its ack floor is a
+// stream position (here it starts at new messages, 50,000 in), while its row count starts at 0.
+func TestConsumerAppearingMidWindowDoesNotFire(t *testing.T) {
+	s := newSim()
+	s.run(70*time.Minute, 20, true)
+	n := len(s.history)
+	for i := range s.history {
+		if i < n-3 {
+			delete(s.history[i].Consumers, "attribution")
+			continue
+		}
+		c := s.history[i].Consumers["attribution"]
+		c.Acked += 50000
+		s.history[i].Consumers["attribution"] = c
+	}
+	if got := firingAt(DefaultConfig, s.history); len(got) != 0 {
+		t.Errorf("a newly appeared consumer fired: %s", describe(got))
+	}
+}

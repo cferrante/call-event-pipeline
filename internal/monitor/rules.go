@@ -138,7 +138,13 @@ func ackedNotWritten(cfg Config, h []Sample, name string) []Finding {
 	if !ok {
 		return nil
 	}
-	a, b := start.Consumers[name], now.Consumers[name]
+	a, okA := start.Consumers[name]
+	b, okB := now.Consumers[name]
+	if !okA || !okB || b.Acked < a.Acked {
+		// Not a full window of readings (the consumer is new, or was reset): an ack floor is a
+		// stream position and a row count starts at zero, so they're only comparable as deltas.
+		return nil
+	}
 	acked := b.Acked - a.Acked
 	handled := (b.Written - a.Written) + (b.DeadLettered - a.DeadLettered)
 	if acked >= cfg.MinAcked && float64(handled) < cfg.MinWrittenRatio*float64(acked) {

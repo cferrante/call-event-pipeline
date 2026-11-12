@@ -3,6 +3,8 @@ package main
 import (
 	"strings"
 	"testing"
+
+	"github.com/cferrante/call-event-pipeline/internal/sendgrid"
 )
 
 func TestListenAddrDefaultsTo8080(t *testing.T) {
@@ -49,6 +51,25 @@ func setValidEnv(t *testing.T) {
 	t.Setenv("INGEST_PUBLIC_URL", "https://hooks.example.com")
 	t.Setenv("NATS_URL", "")
 	t.Setenv("INGEST_FORWARD_TO", "")
+	t.Setenv("SENDGRID_PUBLIC_KEY", "")
+}
+
+// The email route turns on only with a valid SendGrid key; a bad one stops ingest at startup.
+func TestLoadConfigSendGridKey(t *testing.T) {
+	setValidEnv(t)
+	signer, err := sendgrid.NewSigner()
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("SENDGRID_PUBLIC_KEY", signer.PublicKeyBase64())
+	cfg, err := loadConfig()
+	if err != nil || cfg.sendgridKey == nil {
+		t.Fatalf("valid key: key %v, err %v", cfg.sendgridKey, err)
+	}
+	t.Setenv("SENDGRID_PUBLIC_KEY", "not-a-key")
+	if _, err := loadConfig(); err == nil {
+		t.Error("an invalid SENDGRID_PUBLIC_KEY was accepted")
+	}
 }
 
 func TestLoadConfigDefaults(t *testing.T) {
