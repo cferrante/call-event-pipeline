@@ -296,6 +296,15 @@ real inbox moment is wanted in the demo; about $0.10 per 1,000 emails, checked f
 - **Step 6: the conversations view is unchanged.** Email senders have no lead, and the view
   already counts every lead-less interaction as its own conversation.
 
+- **Step 5: the email route extends its own read deadline to 60 s.** The server's 10-second
+  `ReadTimeout` (set in M1 against slow clients) would cut off a 30 MB upload on a slow link;
+  only this route is relaxed, through `http.ResponseController`, so calls and SMS keep the
+  tight limit.
+- **Step 5: the simulator key must be PKCS#8.** `openssl genpkey -outform DER` writes SEC1,
+  which Go's PKCS#8 parser rejects; checking the generated key against the Go code before
+  wiring it up caught this. `env-setup.sh` converts with `openssl pkcs8 -topk8`, and a test
+  runs the script and checks the pair it writes.
+
 ## Code-review outcomes
 
 None yet.

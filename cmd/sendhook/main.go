@@ -1,8 +1,10 @@
-// Command sendhook sends a fake Twilio webhook, signed the way Twilio signs it, to a locally
-// running ingest service. It's a development tool for trying the system without Twilio.
+// Command sendhook sends a fake Twilio webhook, or a fake SendGrid Inbound Parse email, signed
+// the way each provider signs it, to a locally running ingest service. It's a development
+// tool for trying the system without Twilio or SendGrid accounts.
 //
-// It reads TWILIO_AUTH_TOKEN, INGEST_PUBLIC_URL and INGEST_PORT from the environment, like
-// the ingest service, so the signature matches. Run with -h for options.
+// It reads TWILIO_AUTH_TOKEN, INGEST_PUBLIC_URL, INGEST_PORT and (for email)
+// SENDGRID_SIMULATOR_PRIVATE_KEY from the environment, so signatures match what ingest
+// expects. Run with -h for options.
 package main
 
 import (
@@ -18,6 +20,7 @@ import (
 	"time"
 
 	"github.com/cferrante/call-event-pipeline/internal/envelope"
+	"github.com/cferrante/call-event-pipeline/internal/sendgrid"
 	"github.com/cferrante/call-event-pipeline/internal/twilio"
 )
 
@@ -30,6 +33,11 @@ type options struct {
 	publicURL    string // what Twilio would have called; the signature covers this
 	token        string
 	badSignature bool
+
+	// Email (SendGrid Inbound Parse) only.
+	subject     string
+	attachBytes int              // size of one attachment to include; 0 for none
+	signer      *sendgrid.Signer // from SENDGRID_SIMULATOR_PRIVATE_KEY
 }
 
 func main() {
@@ -38,14 +46,33 @@ func main() {
 		port = "8080"
 	}
 	o := options{token: os.Getenv("TWILIO_AUTH_TOKEN"), publicURL: os.Getenv("INGEST_PUBLIC_URL")}
-	flag.StringVar(&o.channel, "channel", "voice", "voice or sms")
-	flag.StringVar(&o.from, "from", "+14158675310", "caller's number (try anonymous)")
-	flag.StringVar(&o.to, "to", "+18005550001", "tracking number called")
-	flag.StringVar(&o.id, "id", "", "CallSid/MessageSid; reuse one to see deduplication (default random)")
-	flag.StringVar(&o.body, "body", "Hi, I saw your ad", "SMS text")
+	flag.StringVar(&o.channel, "channel", "voice", "voice, sms or email")
+	flag.StringVar(&o.from, "from", "", "caller's number, or sender's address for email (try anonymous)")
+	flag.StringVar(&o.to, "to", "", "tracking number called, or tracking address for email")
+	flag.StringVar(&o.id, "id", "", "CallSid/MessageSid/Message-ID; reuse one to see deduplication (default random)")
+	flag.StringVar(&o.body, "body", "Hi, I saw your ad", "SMS or email text")
+	flag.StringVar(&o.subject, "subject", "Question about your ad", "email subject")
+	flag.IntVar(&o.attachBytes, "attach-bytes", 0, "email: include one attachment of this many bytes")
 	flag.StringVar(&o.target, "target", "http://127.0.0.1:"+port, "ingest service address")
 	flag.BoolVar(&o.badSignature, "bad-signature", false, "send an invalid signature")
 	flag.Parse()
+
+	if o.from == "" {
+		o.from = map[bool]string{true: "jordan@example.net", false: "+14158675310"}[o.channel == "email"]
+	}
+	if o.to == "" {
+		o.to = map[bool]string{true: "search-fall@leads.example.com", false: "+18005550001"}[o.channel == "email"]
+	}
+	if o.channel == "email" {
+		if raw := os.Getenv("SENDGRID_SIMULATOR_PRIVATE_KEY"); raw != "" {
+			s, err := sendgrid.ParsePrivateKey(raw)
+			if err != nil {
+				fmt.Fprintln(os.Stderr, "sendhook: SENDGRID_SIMULATOR_PRIVATE_KEY:", err)
+				os.Exit(1)
+			}
+			o.signer = s
+		}
+	}
 
 	if err := run(o); err != nil {
 		fmt.Fprintln(os.Stderr, "sendhook:", err)
@@ -54,7 +81,7 @@ func main() {
 }
 
 func run(o options) error {
-	if o.token == "" || o.publicURL == "" {
+	if o.channel != "email" && (o.token == "" || o.publicURL == "") {
 		return fmt.Errorf("TWILIO_AUTH_TOKEN and INGEST_PUBLIC_URL must be set; run: set -a; source .env; set +a")
 	}
 	req, err := buildRequest(o)
@@ -74,10 +101,13 @@ func run(o options) error {
 
 // buildRequest creates the webhook POST for o, sent to o.target but signed for o.publicURL.
 func buildRequest(o options) (*http.Request, error) {
+	if o.channel == string(envelope.Email) {
+		return buildEmailRequest(o)
+	}
 	ch := envelope.Channel(o.channel)
 	idParam, ok := envelope.IDParam(ch)
 	if !ok {
-		return nil, fmt.Errorf("channel must be voice or sms, got %q", o.channel)
+		return nil, fmt.Errorf("channel must be voice, sms or email, got %q", o.channel)
 	}
 	id := o.id
 	if id == "" {

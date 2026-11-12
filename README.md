@@ -1,6 +1,6 @@
 # Call event pipeline
 
-Real-time ingestion for inbound voice and SMS leads: every call and text is captured and
+Real-time ingestion for inbound voice, SMS and email leads: every call, text and email is captured and
 attributed to its marketing campaign within milliseconds, and the system absorbs large spikes
 in webhook traffic without slowing down downstream AI inference.
 
@@ -10,7 +10,7 @@ Webhooks are acknowledged as soon as they're durably stored in a stream. All rea
 afterwards, in independent consumers that each run at their own pace:
 
     webhook ─► ingest edge ─► NATS JetStream ─┬─► attribution ─► Postgres
-                                              └─► AI inference (planned)
+                                              └─► AI inference ─► Postgres
 
 A traffic spike shows up as a temporary backlog in the stream, not as dropped webhooks or a
 slower AI model.
@@ -70,10 +70,18 @@ psql "$DATABASE_URL" -c 'SELECT provider_id, source, lead_id FROM interactions'
 psql "$DATABASE_URL" -c 'SELECT * FROM campaign_conversations'   # conversations per campaign
 go run ./cmd/sendhook -channel sms -body "what's the price?"      # an SMS the model classifies as sales
 psql "$DATABASE_URL" -c 'SELECT provider_id, intent, score, model_ms FROM insights'
+go run ./cmd/sendhook -channel email -subject "Price?" -attach-bytes 200000  # a signed SendGrid-style email
+psql "$DATABASE_URL" -c "SELECT provider_id, channel, to_address, source FROM interactions WHERE channel = 'email'"
 ```
 
 Calls to numbers missing from `tracking_numbers` are attributed to `unknown`. Add one with
 `INSERT INTO tracking_numbers (phone_e164, campaign_id, source) VALUES ('+18005550001', 'search-fall', 'google');`
+Emails are credited through `tracking_addresses` the same way:
+`INSERT INTO tracking_addresses (address, campaign_id, source) VALUES ('search-fall@leads.example.com', 'search-fall', 'google');`
+
+Email is simulated against SendGrid's Inbound Parse contract: `scripts/env-setup.sh` generates a
+key pair, `sendhook` signs with the private key and ingest verifies with the public one
+(`SENDGRID_PUBLIC_KEY`; without it the email route is off).
 
 **Test**
 

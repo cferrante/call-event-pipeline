@@ -19,7 +19,7 @@ const SchemaVersion = 1
 // SchemaRelease is the full schema version this code writes, major.minor, matching a
 // release of schemas/lead-event. Minor releases only add, so it is informational: it travels
 // in the Schema-Version message header for logs and debugging, not in the body.
-const SchemaRelease = "1.0"
+const SchemaRelease = "1.1"
 
 // Channel is how the lead contacted us.
 type Channel string

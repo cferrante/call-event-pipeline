@@ -50,13 +50,7 @@ func run() error {
 		return err
 	}
 
-	pub := stream.NewPublisher(js)
-	mux := http.NewServeMux()
-	mux.HandleFunc("GET /healthz", healthz)
-	mux.Handle("POST /webhooks/voice", newWebhook(cfg, envelope.Voice, pub, voiceResponse(cfg.forwardTo)))
-	mux.Handle("POST /webhooks/sms", newWebhook(cfg, envelope.SMS, pub, smsResponse))
-
-	srv := newHTTPServer(cfg.addr, mux)
+	srv := newHTTPServer(cfg.addr, routes(cfg, stream.NewPublisher(js)))
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	slog.Info("ingest listening", "config", cfg)
@@ -73,6 +67,20 @@ func run() error {
 		return fmt.Errorf("shutdown: %w", err)
 	}
 	return nil
+}
+
+// routes maps the edge's endpoints. The email route exists only when SendGrid's public key is
+// configured, so the edge never accepts email it can't verify.
+func routes(cfg config, pub publisher) *http.ServeMux {
+	mux := http.NewServeMux()
+	mux.HandleFunc("GET /healthz", healthz)
+	mux.Handle("POST /webhooks/voice", newWebhook(cfg, envelope.Voice, pub, voiceResponse(cfg.forwardTo)))
+	mux.Handle("POST /webhooks/sms", newWebhook(cfg, envelope.SMS, pub, smsResponse))
+	if cfg.sendgridKey != nil {
+		mux.Handle("POST /webhooks/sendgrid/inbound",
+			&emailWebhook{key: cfg.sendgridKey, pub: pub, now: time.Now, maxBytes: maxEmailBytes})
+	}
+	return mux
 }
 
 // newHTTPServer returns the server with its timeouts set.
