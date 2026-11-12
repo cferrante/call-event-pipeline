@@ -13,9 +13,10 @@ large webhook spikes with zero loss and without slowing down AI inference.
 
 ## Project state
 
-Milestones 1 (ingest and attribution) and 2 (inference with backpressure) are complete. Milestone
-3 (priority lanes, using the transactional outbox pattern) is next and not yet planned; see
-[decision D4 in the M2 plan](docs/plan-m2.md#d4-priority-lanes-in-m2-or-later).
+Milestones 1 (ingest and attribution) and 2 (inference with backpressure) are complete.
+Milestone 3 (schema contract and email channel, silent-failure monitor, crash test, on-demand
+AWS environment and server benchmarks) is specified in [the M3 plan](docs/plan-m3.md). Priority
+lanes with the transactional outbox are an M4 candidate.
 
 This section lags behind the code. Check `cmd/`, `internal/`, `migrations/` and the latest plan
 before concluding something does or doesn't exist.
@@ -54,6 +55,9 @@ before concluding something does or doesn't exist.
   missed it, then fix it test-first.
 - **Hand-off steps:** end runnable work with numbered steps and the expected output of each.
   Every step that opens a new terminal starts with `set -a; source .env; set +a`.
+- **Review pages:** a document that needs the user's review (spec, plan, decision record,
+  postmortem, pitch) is published as a rendered review page before it is committed. Routine
+  updates that follow from approved work, such as benchmark rows, don't need one.
 - **Docs style:** reference sections with Markdown anchor links
   (`[section 7](docs/design.md#7-data-model-postgres)`), never the `§` sign.
 
@@ -101,10 +105,16 @@ Don't re-propose these without new evidence; the reasoning is in the design spec
 - **Go** for every service and CLI. **NATS JetStream** as the durable stream, **PostgreSQL** as
   the store; no Kafka, no Redis, no ORM, no web framework.
 - **Native install, no Docker.** Free and open-source tools only.
-- **Inference uses a stub model** that behaves like a real one under overload. Replacing it with
-  a hosted model costs money per call, so it needs a cost estimate first.
-- **Priority lanes are deferred to M3**, because doing them safely requires the transactional
+- **Load tests use a stub model** that behaves like a real one under overload, calibrated from
+  a real model (Groq free tier) measured at a low rate. Running load tests against a hosted
+  model costs money per call, so it needs a cost estimate first.
+- **Priority lanes are an M4 candidate**, because doing them safely requires the transactional
   outbox pattern.
+- **SendGrid and Twilio are simulated** against their documented contracts; no real accounts.
+- **No rewrite in another language** for speed without a CPU profile showing our own code, not
+  I/O, dominates.
+- **AWS:** the owner runs account-level bootstrap; Claude may run `make demo-up`/`demo-down`
+  and server benchmarks within agreed plan steps. Every instance self-terminates after 3 hours.
 
 ## Security and privacy
 
