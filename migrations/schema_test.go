@@ -47,6 +47,15 @@ func insertInteraction(t *testing.T, db *pgxpool.Pool, providerID string, leadID
 	return err
 }
 
+func insertEmail(t *testing.T, db *pgxpool.Pool, providerID, toAddress string) error {
+	t.Helper()
+	_, err := db.Exec(ctx(t), `
+		INSERT INTO interactions (provider_id, channel, from_number, to_address, source, occurred_at, raw)
+		VALUES ($1, 'email', 'jordan@example.net', $2, 'unknown', now(), '{}')`,
+		providerID, toAddress)
+	return err
+}
+
 func wantCode(t *testing.T, err error, code string) {
 	t.Helper()
 	var pgErr *pgconn.PgError
@@ -80,13 +89,40 @@ func TestInteractionLeadMustExist(t *testing.T) {
 	wantCode(t, insertInteraction(t, db, "CA1", &missing, "voice"), foreignKeyViolation)
 }
 
-func TestInteractionChannelIsVoiceOrSMS(t *testing.T) {
+func TestInteractionChannelIsVoiceSMSOrEmail(t *testing.T) {
 	db := dbtest.Migrated(t)
 
 	if err := insertInteraction(t, db, "SM1", nil, "sms"); err != nil {
 		t.Errorf("sms: %v", err)
 	}
+	if err := insertEmail(t, db, "<m1@example.net>", "search-fall@leads.example.com"); err != nil {
+		t.Errorf("email: %v", err)
+	}
 	wantCode(t, insertInteraction(t, db, "FX1", nil, "fax"), checkViolation)
+}
+
+// An interaction was sent to a tracking number or a tracking address, never both or neither.
+func TestInteractionHasExactlyOneDestination(t *testing.T) {
+	db := dbtest.Migrated(t)
+	_, err := db.Exec(ctx(t), `
+		INSERT INTO interactions (provider_id, channel, from_number, to_e164, to_address, source, occurred_at, raw)
+		VALUES ('<m2@example.net>', 'email', 'a@example.net', '+18005551212', 'x@leads.example.com', 'unknown', now(), '{}')`)
+	wantCode(t, err, checkViolation)
+	_, err = db.Exec(ctx(t), `
+		INSERT INTO interactions (provider_id, channel, from_number, source, occurred_at, raw)
+		VALUES ('CA9', 'voice', '+14158675310', 'unknown', now(), '{}')`)
+	wantCode(t, err, checkViolation)
+}
+
+// Addresses are stored lowercased so a lookup can't miss on case.
+func TestTrackingAddressIsLowercase(t *testing.T) {
+	db := dbtest.Migrated(t)
+	ins := `INSERT INTO tracking_addresses (address, campaign_id, source) VALUES ($1, 'search-fall', 'google')`
+	if _, err := db.Exec(ctx(t), ins, "search-fall@leads.example.com"); err != nil {
+		t.Fatalf("lowercase address: %v", err)
+	}
+	_, err := db.Exec(ctx(t), ins, "Radio@Leads.Example.com")
+	wantCode(t, err, checkViolation)
 }
 
 func TestLeadPhoneIsUnique(t *testing.T) {

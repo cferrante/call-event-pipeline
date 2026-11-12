@@ -27,7 +27,12 @@ type Channel string
 const (
 	Voice Channel = "voice"
 	SMS   Channel = "sms"
+	Email Channel = "email" // schema 1.1
 )
+
+// supported lists the channels this code reads; Parse rejects any other, so an older
+// consumer dead-letters a newer channel instead of misreading it.
+var supported = map[Channel]bool{Voice: true, SMS: true, Email: true}
 
 // Envelope is one inbound interaction, exactly as received. Params holds every original
 // form parameter so events can be replayed and reprocessed later.
@@ -40,9 +45,13 @@ type Envelope struct {
 	To            string     `json:"to"`
 	ReceivedAt    time.Time  `json:"received_at"`
 	Params        url.Values `json:"params"`
+
+	// Email only (schema 1.1). Omitted for calls and SMS, so their events are unchanged.
+	Subject         string `json:"subject,omitempty"`
+	AttachmentCount int    `json:"attachment_count,omitempty"`
 }
 
-// idParam is the form parameter that uniquely identifies each channel's interaction.
+// idParam is the Twilio form parameter that uniquely identifies each channel's interaction.
 var idParam = map[Channel]string{
 	Voice: "CallSid",
 	SMS:   "MessageSid",
@@ -91,7 +100,7 @@ func Parse(data []byte) (Envelope, error) {
 	switch {
 	case env.SchemaVersion != SchemaVersion:
 		return Envelope{}, fmt.Errorf("unsupported schema_version %d", env.SchemaVersion)
-	case idParam[env.Channel] == "":
+	case !supported[env.Channel]:
 		return Envelope{}, fmt.Errorf("unknown channel %q", env.Channel)
 	case env.ProviderID == "":
 		return Envelope{}, errors.New("missing provider_id")

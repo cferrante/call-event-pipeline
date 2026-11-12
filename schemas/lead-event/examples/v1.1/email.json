@@ -1,0 +1,19 @@
+{
+  "schema_version": 1,
+  "channel": "email",
+  "provider": "sendgrid",
+  "provider_id": "<CABQbZKG0123456789abcdef@mail.example.com>",
+  "from": "jordan@example.net",
+  "to": "search-fall@leads.example.com",
+  "received_at": "2026-10-27T12:00:03.250Z",
+  "subject": "Quote for a new roof?",
+  "attachment_count": 1,
+  "params": {
+    "from": ["Jordan Lee <jordan@example.net>"],
+    "to": ["search-fall@leads.example.com"],
+    "subject": ["Quote for a new roof?"],
+    "text": ["Hi, what's the price for a roof replacement? Photo attached."],
+    "envelope": ["{\"to\":[\"search-fall@leads.example.com\"],\"from\":\"jordan@example.net\"}"],
+    "headers": ["Message-ID: <CABQbZKG0123456789abcdef@mail.example.com>\nSubject: Quote for a new roof?\n"]
+  }
+}

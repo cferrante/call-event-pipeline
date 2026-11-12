@@ -289,3 +289,60 @@ func TestRecordStoresTheWholeEnvelope(t *testing.T) {
 		t.Errorf("stored envelope = %s, want %s", gotJSON, want)
 	}
 }
+
+func email(t *testing.T, id, from, to string, at time.Time) envelope.Envelope {
+	t.Helper()
+	return envelope.Envelope{
+		SchemaVersion: envelope.SchemaVersion, Channel: envelope.Email, Provider: "sendgrid",
+		ProviderID: id, From: from, To: to, ReceivedAt: at, Subject: "Quote?",
+		Params: url.Values{"subject": {"Quote?"}, "text": {"price please"}},
+	}
+}
+
+// Email is credited through tracking addresses, matched regardless of case. Leads are keyed
+// by phone number, so an email sender gets no lead (docs/design.md, section 5.3).
+func TestRecordEmailAttributesTrackingAddress(t *testing.T) {
+	db, store := setup(t)
+	if _, err := db.Exec(ctx(t), `
+		INSERT INTO tracking_addresses (address, campaign_id, source, active) VALUES
+			('search-fall@leads.example.com', 'search-fall', 'google', true),
+			('old-promo@leads.example.com', 'old-promo', 'email', false)`); err != nil {
+		t.Fatalf("seed tracking addresses: %v", err)
+	}
+
+	record(t, store, email(t, "<m1@example.net>", "jordan@example.net", "Search-Fall@Leads.Example.com", t0))
+	record(t, store, email(t, "<m2@example.net>", "jordan@example.net", "old-promo@leads.example.com", t0))
+	record(t, store, email(t, "<m3@example.net>", "jordan@example.net", "nobody@leads.example.com", t0))
+
+	got := interaction(t, db, "<m1@example.net>")
+	if str(got.CampaignID) != "search-fall" || got.Source != "google" || got.LeadID != nil {
+		t.Errorf("known address: campaign=%s source=%s lead=%v, want search-fall google no lead",
+			str(got.CampaignID), got.Source, got.LeadID)
+	}
+	for _, id := range []string{"<m2@example.net>", "<m3@example.net>"} {
+		if got := interaction(t, db, id); got.CampaignID != nil || got.Source != "unknown" {
+			t.Errorf("%s: campaign=%s source=%s, want unknown", id, str(got.CampaignID), got.Source)
+		}
+	}
+	var toAddr string
+	var toNum *string
+	if err := db.QueryRow(ctx(t), `SELECT to_address, to_e164 FROM interactions WHERE provider_id = '<m1@example.net>'`).
+		Scan(&toAddr, &toNum); err != nil {
+		t.Fatalf("destination: %v", err)
+	}
+	if toAddr != "search-fall@leads.example.com" || toNum != nil {
+		t.Errorf("to_address=%q to_e164=%v, want the lowercased address and no number", toAddr, toNum)
+	}
+	if n := count(t, db, "leads"); n != 0 {
+		t.Errorf("%d leads, want 0 for email senders", n)
+	}
+}
+
+// A tracking number written like an address must not match an email, and vice versa.
+func TestRecordEmailDoesNotMatchTrackingNumbers(t *testing.T) {
+	db, store := setup(t)
+	record(t, store, email(t, "<m4@example.net>", "jordan@example.net", googleNum, t0))
+	if got := interaction(t, db, "<m4@example.net>"); got.CampaignID != nil {
+		t.Errorf("email to %s credited to %s, want unknown", googleNum, str(got.CampaignID))
+	}
+}

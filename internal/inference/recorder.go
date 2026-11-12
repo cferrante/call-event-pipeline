@@ -3,6 +3,7 @@ package inference
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/cferrante/call-event-pipeline/internal/envelope"
@@ -38,7 +39,7 @@ func (r *Recorder) Record(ctx context.Context, env envelope.Envelope) (bool, err
 	}
 
 	start := r.now()
-	result, err := r.model.Classify(ctx, Input{Channel: env.Channel, Body: env.Params.Get("Body")})
+	result, err := r.model.Classify(ctx, Input{Channel: env.Channel, Body: text(env)})
 	latency := r.now().Sub(start) // model latency: the model call alone, not queue time
 	if err != nil {
 		return false, fmt.Errorf("classify %s: %w", env.ProviderID, err)
@@ -50,4 +51,13 @@ func (r *Recorder) Record(ctx context.Context, env envelope.Envelope) (bool, err
 		Result:       result,
 		ModelLatency: latency,
 	})
+}
+
+// text is what the model reads: an SMS body, or an email's subject and text together, so a
+// question asked only in the subject line still counts. Calls have no text yet.
+func text(env envelope.Envelope) string {
+	if env.Channel == envelope.Email {
+		return strings.TrimSpace(env.Subject + "\n\n" + env.Params.Get("text"))
+	}
+	return env.Params.Get("Body")
 }

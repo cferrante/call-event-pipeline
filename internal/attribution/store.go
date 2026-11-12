@@ -23,13 +23,21 @@ func NewStore(db *pgxpool.Pool) *Store {
 }
 
 // insertInteraction is the idempotency gate (docs/design.md, section 5.5): it inserts the
-// interaction with the tracking number's current campaign, or returns no row if this
-// provider_id was already recorded. Unknown and inactive numbers are credited to 'unknown'.
+// interaction with its tracking number's (or, for email, tracking address's) current
+// campaign, or returns no row if this provider_id was already recorded. Unknown and inactive
+// destinations are credited to 'unknown'. $2 is the channel: email matches only addresses,
+// calls and SMS only numbers.
 const insertInteraction = `
-INSERT INTO interactions (provider_id, channel, from_number, to_e164, campaign_id, source, occurred_at, raw)
-SELECT $1, $2, $3, $4, tn.campaign_id, coalesce(tn.source, 'unknown'), $5, $6
+INSERT INTO interactions (provider_id, channel, from_number, to_e164, to_address,
+                          campaign_id, source, occurred_at, raw)
+SELECT $1, $2, $3,
+       CASE WHEN $2 = 'email' THEN NULL ELSE $4 END,
+       CASE WHEN $2 = 'email' THEN lower($4) END,
+       coalesce(tn.campaign_id, ta.campaign_id),
+       coalesce(tn.source, ta.source, 'unknown'), $5, $6
 FROM (SELECT) AS one
-LEFT JOIN tracking_numbers tn ON tn.phone_e164 = $4 AND tn.active
+LEFT JOIN tracking_numbers tn ON $2 <> 'email' AND tn.phone_e164 = $4 AND tn.active
+LEFT JOIN tracking_addresses ta ON $2 = 'email' AND ta.address = lower($4) AND ta.active
 ON CONFLICT (provider_id) DO NOTHING
 RETURNING id, campaign_id, source`
 
@@ -70,7 +78,7 @@ func (s *Store) Record(ctx context.Context, env envelope.Envelope) (bool, error)
 			source        string
 		)
 		err := tx.QueryRow(ctx, insertInteraction,
-			env.ProviderID, env.Channel, env.From, env.To, env.ReceivedAt, raw,
+			env.ProviderID, string(env.Channel), env.From, env.To, env.ReceivedAt, raw,
 		).Scan(&interactionID, &campaignID, &source)
 		if errors.Is(err, pgx.ErrNoRows) {
 			return nil // already recorded
@@ -80,8 +88,10 @@ func (s *Store) Record(ctx context.Context, env envelope.Envelope) (bool, error)
 		}
 		recorded = true
 
-		if env.AnonymousCaller() {
-			return nil // no way to identify the lead; the campaign is still credited
+		if env.Channel == envelope.Email || env.AnonymousCaller() {
+			// Leads are keyed by phone number, so email senders and withheld numbers get no
+			// lead; the campaign is still credited.
+			return nil
 		}
 		var leadID int64
 		if err := tx.QueryRow(ctx, upsertLead,
