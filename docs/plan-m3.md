@@ -72,20 +72,21 @@ On branch `m3-spec`; merged before any code. The spec changes are in
 ### Step 4: SendGrid Inbound Parse signature (`internal/sendgrid`, unit)
 
 - ECDSA (P-256) verification of the signature over timestamp and body, with SendGrid's public
-  key from env; reject timestamps older than 5 minutes. Header names and the signed payload are
-  confirmed against Twilio's API reference first, and the source recorded here.
-- Tests first: valid signature accepted; tampered body, wrong key, missing header and stale
-  timestamp rejected. Signing helper for tests and `sendhook` uses a generated key pair.
+  key from env. Header names and the signed payload confirmed against Twilio's docs (see the
+  deviations below).
+- Tests first: valid signature accepted; tampered body, wrong key, missing header and a
+  non-numeric timestamp rejected. Signing helper for tests and `sendhook` uses a generated key pair.
 - Commit: *Verify SendGrid Inbound Parse signatures*.
 
 ### Step 5: Email channel at the edge, schema v1.1 (unit, integration)
 
-- `POST /webhooks/sendgrid/inbound`: 1 MB cap, signature check, `Message-ID` as `provider_id`,
+- `POST /webhooks/sendgrid/inbound`: 30 MB cap with the body streamed, signature check, `Message-ID` as `provider_id`,
   attachments counted not kept, publish to `leads.raw.email` with `Schema-Version: 1.1`.
 - Schema v1.1: `channel` adds `email`; optional `subject`, `attachment_count`; examples under
   `examples/v1.1/`. The v1.0 examples must still validate.
 - `sendhook -channel email`.
-- Tests first: 403 on a bad signature, 400 without a `Message-ID`, 413 over the cap, published
+- Tests first: 403 on a bad signature, 400 without a `Message-ID`, 413 over 30 MB, an email
+  with a large attachment accepted without buffering it, published
   envelope validates against v1.1, a retried email is deduplicated.
 - Commit: *Accept inbound email through a SendGrid-shaped webhook*.
 
@@ -262,6 +263,27 @@ real inbox moment is wanted in the demo; about $0.10 per 1,000 emails, checked f
   proven with a deliberate break: a strict JSON reader failed both stores' contract tests on
   the unknown-field example, and retrying parse errors gave 5 deliveries instead of 1. The
   spec's [section 6.1](design.md#61-the-schema-as-a-contract-m3) is corrected.
+
+- **Step 4: SendGrid's signing details, from its docs.** Sources: Twilio's "Securing your
+  Inbound Parse Webhooks" (modified 2026-10-07), which defers to "Event Webhook security
+  features" (modified 2026-07-23) for the mechanics, and "Setting up the Inbound Parse
+  Webhook" (modified 2026-10-08) for the fields. Headers
+  `X-Twilio-Email-Event-Webhook-Signature` / `-Timestamp`; ECDSA over SHA-256 of the timestamp
+  bytes then the raw body, no separator; base64 ASN.1 signature; base64 DER public key. The
+  docs don't name the curve: the example key's encoding identifies P-256, and a test pins that
+  our keys encode with the same prefix.
+- **Step 4: no timestamp freshness window.** The spec proposed rejecting timestamps older than
+  5 minutes. The docs give no tolerance and don't say whether retries are re-signed, so a
+  window risks rejecting legitimate retries and losing leads; replays are already harmless
+  because of `Message-ID` deduplication. Instead the timestamp must be digits only: a test
+  first written to show that moving bytes between timestamp and body breaks the signature
+  was wrong, since the unseparated construction makes `"17615664001"+"23"` and
+  `"1761566400"+"123"` the same bytes. Digits only closes that.
+- **Step 4/5: 30 MB streamed instead of a 1 MB cap.** SendGrid accepts 30 MB emails with
+  attachments; a 1 MB cap would reject them and lose those leads. The edge streams the body,
+  discarding attachment parts unbuffered while hashing every byte for the signature.
+- **Step 5: `Message-ID` comes from the raw `headers` field,** as Inbound Parse has no
+  dedicated field.
 
 ## Code-review outcomes
 
