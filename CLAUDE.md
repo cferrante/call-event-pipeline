@@ -69,8 +69,9 @@ no Docker. Load the environment first in every terminal: `set -a; source .env; s
 - `./scripts/db-setup.sh`: one-time setup. Creates `.env` with random secrets, the app role and
   the database.
 - `nats-server -js -sd ./data/nats -m 8222`: message broker; Ctrl-C to stop.
-- `go run ./cmd/attribution`, `./cmd/inference`, `./cmd/ingest`: the three services, one per
-  terminal. Each finishes in-flight work on Ctrl-C.
+- `go run ./cmd/attribution`, `./cmd/inference`, `./cmd/ingest`, `./cmd/monitor`: the
+  services, one per terminal. Each finishes in-flight work on Ctrl-C. The monitor's status page
+  is on `http://127.0.0.1:8090` (loopback only).
 - `go run ./cmd/sendhook`: send a signed fake webhook (`-channel sms`, `-bad-signature`).
 - `go test ./...`: unit tests, no services needed.
 - `go test -tags integration -count=1 ./...`: integration and end-to-end tests. `-count=1`

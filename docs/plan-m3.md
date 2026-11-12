@@ -316,6 +316,22 @@ real inbox moment is wanted in the demo; about $0.10 per 1,000 emails, checked f
   (arrival rate, per-consumer capacity) reproduces the recorded shape, and a test checks it
   does: inference lag peaks above 40,000, as measured (45,642).
 
+- **Step 8: the status page polls instead of using server-sent events.** It fetches
+  `/status` every 2 seconds, which looks live at a 5-second reading interval and needs no
+  long-lived connection handling. Its script and styles are separate files so the page runs
+  under a strict Content-Security-Policy with nothing inline.
+- **Step 8: the monitor reads JetStream through its API, not the `:8222/jsz` HTTP endpoint.**
+  The client gives the same numbers (stream last sequence, ack floors, the oldest pending
+  message) without exposing or parsing the monitoring port.
+- **Step 8: the canary comes from `From: canary`.** Not an E.164 number, so it never creates a
+  lead; migration `0007` keeps it out of the campaign report.
+- **Step 8: two defects found and fixed in passing.** The acked-but-not-written rule compared
+  a consumer that appeared mid-window against zero (a realistic test, with the ack floor as a
+  stream position, showed a false alert; the simulator's first version hid it because both
+  counts started at zero). And ingest's defaults test read `SENDGRID_PUBLIC_KEY` from the
+  shell, failing once `.env` had the key; it passed in step 5 and in CI only because neither
+  environment had it yet.
+
 ## Code-review outcomes
 
 None yet.
