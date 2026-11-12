@@ -9,16 +9,20 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+
+	"github.com/cferrante/call-event-pipeline/internal/testenv"
 )
 
 // Start runs the nats-server binary on a free local port with JetStream storage in a
 // temporary directory, and returns a connection to it. The server is stopped and its
-// data deleted when the test ends. The test is skipped if nats-server isn't installed.
+// data deleted when the test ends. If nats-server isn't installed the test is skipped, or
+// fails under REQUIRE_INTEGRATION=1 (see package testenv).
 func Start(t *testing.T) *nats.Conn {
 	t.Helper()
 	bin, err := exec.LookPath("nats-server")
 	if err != nil {
-		t.Skip("nats-server not found on PATH; see docs/plan-m1.md step 0")
+		testenv.Missing(t, "nats-server not found on PATH; see docs/plan-m1.md step 0")
+		return nil
 	}
 
 	port := freePort(t)

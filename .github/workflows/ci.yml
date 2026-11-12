@@ -1,0 +1,74 @@
+# Formatting, vet, unit and integration tests on every pull request and on main.
+# Services run natively on the runner (no containers), as they do in development.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NATS_SERVER_VERSION: v2.15.1
+  NATS_SERVER_SHA256: bf5edc7b1ce98e885c368cb43a886eb148dc5d0551d99f3cf6141fb5e1954c70
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      # Actions are pinned to a commit, not a tag: a tag can be moved to different code.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Formatting
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"; echo "$unformatted"; exit 1
+          fi
+
+      - name: Vet
+        run: |
+          go vet ./...
+          go vet -tags integration ./...
+
+      - name: Unit tests
+        run: go test ./...
+
+      - name: Install nats-server
+        run: |
+          file="nats-server-${NATS_SERVER_VERSION}-linux-amd64"
+          curl -fsSL -o "$RUNNER_TEMP/$file.tar.gz" \
+            "https://github.com/nats-io/nats-server/releases/download/${NATS_SERVER_VERSION}/$file.tar.gz"
+          echo "${NATS_SERVER_SHA256}  $RUNNER_TEMP/$file.tar.gz" | sha256sum -c -
+          tar -xzf "$RUNNER_TEMP/$file.tar.gz" -C "$RUNNER_TEMP"
+          echo "$RUNNER_TEMP/$file" >> "$GITHUB_PATH"
+
+      - name: Start Postgres
+        # The runner image ships PostgreSQL; the role mirrors scripts/db-setup.sh. The password
+        # is random per run and masked, so it never appears in the public log.
+        run: |
+          sudo systemctl start postgresql.service
+          pw=$(openssl rand -hex 16)
+          echo "::add-mask::$pw"
+          sudo -u postgres psql -X -q -v ON_ERROR_STOP=1 -v pw="$pw" <<'SQL'
+          CREATE ROLE leads_app WITH LOGIN NOSUPERUSER CREATEDB PASSWORD :'pw';
+          SQL
+          echo "DATABASE_URL=postgres://leads_app:$pw@127.0.0.1:5432/postgres" >> "$GITHUB_ENV"
+
+      - name: Integration and end-to-end tests
+        # REQUIRE_INTEGRATION turns "dependency missing" skips into failures, so this step
+        # can't pass without actually running against NATS and Postgres.
+        env:
+          REQUIRE_INTEGRATION: "1"
+        run: go test -tags integration -count=1 ./...

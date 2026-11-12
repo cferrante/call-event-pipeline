@@ -241,7 +241,19 @@ real inbox moment is wanted in the demo; about $0.10 per 1,000 emails, checked f
 
 ## Deviations from the plan
 
-None yet.
+- **Step 1: integration tests can no longer pass by skipping in CI.** `dbtest` and `natstest`
+  skip a test when Postgres or `nats-server` is missing, and Go reports a skipped test as
+  `ok`, so a misconfigured CI job would have been green while testing nothing. New package
+  `internal/testenv` turns those skips into failures when `REQUIRE_INTEGRATION=1`, which CI
+  sets. Proven by running the attribution tests without `DATABASE_URL`: skipped (`ok`) by
+  default, `FAIL` with the variable set.
+- **Step 1: CI exposed a flaky test helper, fixed in this step.** The first CI run failed
+  `TestConsumersProgressIndependently` (7 of 10 deliveries). The helper `waitSettled` treated
+  "nothing pending" as done, but JetStream updates a consumer's pending count asynchronously,
+  so under CPU contention it briefly reads 0 while messages are undelivered. Reproduced locally
+  with 8 parallel runs on 2 cores (9 failures in 480 runs); the earlier local runs, on an idle
+  8-core machine, never opened that window. The helper now waits until the consumer's ack
+  floor reaches the stream's last sequence: 0 failures in 480 runs under the same contention.
 
 ## Code-review outcomes
 
