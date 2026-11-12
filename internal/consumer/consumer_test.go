@@ -678,3 +678,37 @@ func TestChangedStartPositionNeedsReset(t *testing.T) {
 		t.Errorf("EnsureConsumer after reset: %v", err)
 	}
 }
+
+// Contract rule: a consumer dead-letters a major version or a channel it doesn't support on
+// the first delivery, with the reason, so an upgraded consumer can replay it. It never
+// retries what can't succeed, and never guesses.
+func TestUnsupportedVersionOrChannelIsDeadLetteredOnFirstDelivery(t *testing.T) {
+	valid := `{"schema_version":1,"channel":"sms","provider":"twilio","provider_id":"SM1",` +
+		`"from":"+14155550101","to":"+18005550002","received_at":"2026-10-27T12:00:01Z","params":{}}`
+	cases := map[string]struct{ data, reason string }{
+		"major version 2": {strings.Replace(valid, `"schema_version":1`, `"schema_version":2`, 1), "schema_version"},
+		"unknown channel": {strings.Replace(valid, `"channel":"sms"`, `"channel":"fax"`, 1), "channel"},
+	}
+	for name, c := range cases {
+		t.Run(name, func(t *testing.T) {
+			rec := &fakeRecorder{result: true}
+			h := start(t, rec)
+			h.publishRaw(t, c.data)
+			info := h.waitSettled(t)
+
+			if rec.callCount() != 0 {
+				t.Errorf("Record called %d times, want 0", rec.callCount())
+			}
+			if info.Delivered.Consumer != 1 {
+				t.Errorf("deliveries = %d, want 1", info.Delivered.Consumer)
+			}
+			dlq := h.dlqMessages(t)
+			if len(dlq) != 1 {
+				t.Fatalf("dead-lettered %d messages, want 1", len(dlq))
+			}
+			if got := dlq[0].Header.Get(HeaderReason); !strings.Contains(got, c.reason) {
+				t.Errorf("%s = %q, want it to name the %s", HeaderReason, got, c.reason)
+			}
+		})
+	}
+}

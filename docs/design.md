@@ -308,10 +308,11 @@ consumers. M3 makes it an explicit, tested contract.
   - A consumer that receives a major version, or a channel, it doesn't support dead-letters the
     message with the reason. It never crashes or guesses.
 - **v1.1 adds `channel: "email"`.** Adding an enum value looks additive but isn't safe for a
-  consumer that assumes only `voice` and `sms`; today the database's `CHECK` constraint would
-  reject it and the message would be retried five times before reaching the DLQ. The rule above
-  makes the behaviour explicit and tested. Email-only fields (`subject`, `attachment_count`) are
-  optional.
+  consumer that assumes only `voice` and `sms`. Our consumers already reject an unknown
+  channel in `envelope.Parse` and dead-letter it on the first delivery; the contract tests now
+  pin that behaviour, so a consumer that isn't upgraded parks email events in the DLQ for
+  replay instead of losing or misreading them. Email-only fields (`subject`,
+  `attachment_count`) are optional.
 - **Tests:**
   - *Producer:* every envelope `ingest` builds validates against the current schema.
   - *Consumer contract:* each consumer processes every example of every minor version it
