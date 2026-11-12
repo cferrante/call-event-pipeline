@@ -1,6 +1,6 @@
 # Design spec: decoupled lead ingestion layer
 
-Status: **agreed; milestones 1 and 2 implemented** · Stack: Go + NATS JetStream + Postgres (all native on Ubuntu/WSL2)
+Status: **agreed; milestones 1 and 2 implemented, milestone 3 specified** · Stack: Go + NATS JetStream + Postgres (all native on Ubuntu/WSL2; an on-demand AWS environment for server measurements)
 
 New to the terms used here (stream, consumer, ack, …)? See the [concepts guide](concepts.md).
 
@@ -12,12 +12,21 @@ New to the terms used here (stream, consumer, ack, …)? See the [concepts guide
 3. Attribute every interaction to a campaign/source within milliseconds of it being processed.
 4. Isolate downstream AI inference so that webhook spikes show up as **queue lag**, not as
    slower or failing inference.
+5. Detect a **silent failure** (a component that stays up but stops doing its job) within a
+   minute, and recover from it without losing data.
+6. Let the event schema evolve without a producer change silently breaking a consumer owned by
+   another team.
+7. Prove goals 1–5 with measurements on server hardware, not only on a laptop.
 
 ## 2. Non-goals (for now)
 
-- Real Twilio account / public URL (we simulate Twilio-shaped webhooks locally).
-- Real AI model calls (milestone 2 uses a stub with configurable latency).
-- Multi-node NATS cluster, Kubernetes, cloud deployment, auth on dashboards.
+- Real Twilio or SendGrid accounts / public URL (we simulate their webhooks and APIs against
+  their documented contracts).
+- Real AI model calls **in load tests**: they use a stub with configurable latency (M2), whose
+  profile M3 calibrates from a real model measured at a low rate ([section 5.4](#54-inference-consumer-cmdinference)).
+- Multi-node NATS cluster, Kubernetes, production cloud deployment, auth on dashboards. M3 adds
+  an **on-demand** AWS environment for demos and measurements, created and destroyed per
+  session ([section 13](#13-demo-environment-aws)).
 - Call recording / transcription.
 - Ingesting outbound calls/SMS (needed to tell replies apart from new contacts; see
   [section 12](#12-decisions-and-known-limitations)).
@@ -29,13 +38,15 @@ Milestones are referred to as M1, M2, …
 | Milestone | Scope | Done when |
 |---|-------|-----------|
 | M1 | Ingest edge → JetStream → attribution consumer → Postgres, dead-letter path, k6 spike test | Spike test shows 0 lost, 0 duplicated interactions |
-| M2 | AI inference consumer with bounded concurrency, priority lanes, stub model | Under spike, stub-inference p95 stays flat while consumer lag absorbs the burst, then drains |
+| M2 | AI inference consumer with bounded concurrency, stub model | Under spike, stub-inference p95 stays flat while consumer lag absorbs the burst, then drains |
+| M3 | Schema contract and email channel, silent-failure monitor with alerting and replay recovery, crash test, on-demand AWS environment, server benchmarks, decision record, pitch ([plan](plan-m3.md)) | A silent failure is detected within 60 s and recovered with zero loss; repeated `kill -9` under load leaves data identical to a clean run; contract tests catch a breaking schema change; results measured on AWS |
+| M4 (candidate) | Priority lanes with the transactional outbox; batched and parallel attribution | Chosen from M3's profile and throughput measurements |
 
 ## 4. Architecture
 
 ```
- webhook (voice | sms)
-        │ POST, form-encoded, X-Twilio-Signature
+ webhook (voice | sms | email)
+        │ POST; X-Twilio-Signature (voice, SMS) or SendGrid ECDSA signature (email)
         ▼
  ┌─────────────────────┐  verify signature → publish (wait for PubAck) → 200
  │ cmd/ingest          │  never touches Postgres
@@ -43,7 +54,7 @@ Milestones are referred to as M1, M2, …
            ▼
  ┌───────────────────────────────────────────┐
  │ JetStream stream LEADS                     │  file storage, dedupe by Nats-Msg-Id
- │ subjects: leads.raw.voice, leads.raw.sms   │
+ │ subjects: leads.raw.{voice,sms,email}      │
  └───────┬───────────────────────────┬───────┘
          │ durable consumer          │ durable consumer (M2)
          │ "attribution"             │ "inference"
@@ -60,12 +71,22 @@ Milestones are referred to as M1, M2, …
 Each consumer is independent: a slow inference consumer cannot slow attribution, and neither
 can slow the edge, because the stream sits between them.
 
+Beside the data path (M3), `cmd/monitor` watches it from outside: it reads NATS's monitoring
+endpoint and Postgres, raises alerts through an `Alerter`, and serves a live status page. In
+demos, alert emails go to `cmd/mailsink`, a stand-in for SendGrid's Mail Send API.
+
+```
+ NATS :8222 (jsz) ──┐                     ┌──► log (always)
+                    ├──► cmd/monitor ─────┼──► SendGrid Mail Send API (or cmd/mailsink)
+ Postgres ──────────┘     status page     └──► (optional) Amazon SES
+```
+
 ## 5. Components
 
 ### 5.1 Ingest edge (`cmd/ingest`)
 
 - Go stdlib `net/http` (1.22+ pattern routing). Routes: `POST /webhooks/voice`, `POST /webhooks/sms`,
-  `GET /healthz`.
+  `POST /webhooks/sendgrid/inbound` (M3), `GET /healthz`.
 - Steps per request:
   1. Cap the body size (`http.MaxBytesReader`, 64 KB).
   2. Verify `X-Twilio-Signature` (HMAC-SHA1 over full URL + sorted POST params, base64).
@@ -80,6 +101,18 @@ can slow the edge, because the stream sits between them.
 - *Voice caveat:* a voice webhook's response tells Twilio what to do with the live call, so it
   must stay static and instant (e.g. `<Dial>` to a configured number). The edge never waits
   on attribution or AI to decide call routing.
+- **Email (M3)** follows SendGrid's Inbound Parse contract: a `multipart/form-data` POST with
+  `from`, `to`, `subject`, `text`, `headers` and an `envelope` JSON field.
+  - Body cap 1 MB. Attachments are not kept: the envelope records only their count, which keeps
+    the stream small and keeps attachment content (often PII) out of it.
+  - The request must carry a valid **ECDSA signature** from SendGrid's security policy
+    (signature and timestamp headers, verified with SendGrid's public key from env).
+    Invalid → `403`. Timestamps older than 5 minutes are rejected, so a captured request can't
+    be replayed later. Exact header names are confirmed against Twilio's API reference when
+    built.
+  - `provider_id` is the email's `Message-ID` header, the email equivalent of a `MessageSid`,
+    so provider retries dedupe exactly as for SMS. A message without one is rejected with
+    `400`, since it couldn't be deduplicated.
 
 ### 5.2 JetStream configuration
 
@@ -101,14 +134,17 @@ can slow the edge, because the stream sits between them.
     1. Insert into `interactions` `ON CONFLICT (provider_id) DO NOTHING`. If no row was
        inserted, this message was already processed: stop and change nothing else. This
        insert is the idempotency gate; see [section 5.5](#55-delivery-guarantees).
-    2. Look up `To` in `tracking_numbers` → campaign/source/medium. No in-memory cache: it's a
+    2. Look up `To` in `tracking_numbers` → campaign/source/medium (for email, in
+       `tracking_addresses`, M3). No in-memory cache: it's a
        primary-key lookup inside a transaction we're already running, so it's always fresh.
        Unknown or inactive number → `source = 'unknown'` (not an error).
     3. Upsert the caller into `leads` by `From`, comparing `occurred_at` rather than processing
        order: first-touch takes the earliest interaction, last-touch the latest. *Why:*
        redelivery and parallel workers mean a later call can be processed before an earlier one.
        Withheld caller ID → skip the lead; the interaction keeps `lead_id = NULL`, so the
-       campaign still gets credit. Otherwise set the interaction's `lead_id`.
+       campaign still gets credit. Otherwise set the interaction's `lead_id`. Email senders
+       get no lead in M3 either, because leads are keyed by phone number; matching one person
+       across channels is later work ([section 12](#12-decisions-and-known-limitations)).
   - Commit → `Ack`.
   - A cache is added only if the spike test ([section 8](#8-measuring-absorbing-spikes)) shows
     the lookup is a bottleneck.
@@ -120,6 +156,13 @@ can slow the edge, because the stream sits between them.
     which is an unstored message lost if no listener is running at that moment. The consumer
     allows one spare delivery (`MaxDeliver` 6), so if that dead-letter write fails, or the
     worker crashes during attempt 5, the message is delivered once more and dead-lettered then.
+  - **Unsupported schema version or channel** (M3) → dead letter at once, with the reason, so
+    an upgraded consumer can replay it ([section 6](#6-event-schema)).
+- **Replay (M3):** `attribution -replay-from <RFC 3339 time>` creates a temporary consumer that
+  starts at that time, reprocesses everything up to the stream's end, then deletes itself. The
+  durable `attribution` consumer is untouched. Because every write is idempotent, already
+  written messages are no-ops, so replay is the recovery for any period when writes went
+  missing ([section 8.3](#83-fault-injection-and-recovery-m3)).
 
 ### 5.4 Inference consumer (`cmd/inference`)
 
@@ -154,7 +197,16 @@ a webhook spike, letting work wait in the stream instead.
 - **Errors** follow [section 5.3](#53-attribution-consumer-cmdattribution): overload and database
   errors are retried with delays; unparseable messages and exhausted retries go to the DLQ,
   marked with a `Dlq-Consumer` header since both consumers share it.
-- **Priority lanes** (first-touch leads before repeat contacts) are deferred to M3, where
+- **Email (M3):** the model classifies the subject and text, as it does an SMS body.
+- **A real model (M3)** sits behind the same interface: a Groq adapter (standard-library HTTP,
+  no SDK), with the API key read from SSM at run time. On a hosted model, capacity is a rate
+  limit rather than a number of concurrent calls, so a tokens-per-minute limiter runs beside
+  the worker pool, and a `429` that still arrives is retried after `retry-after`. Phone numbers
+  and email addresses are stripped before any call, and only synthetic texts are ever sent.
+  It is used for **calibration**: a low-rate run measures real p50/p95/p99 latency and where
+  `429`s begin, and those numbers replace the stub's guessed load-test profile. A small
+  labelled set gives a measured accuracy for both the real model and the stub's rules.
+- **Priority lanes** (first-touch leads before repeat contacts) are a candidate for M4, where
   publishing "first touch" events safely needs the transactional outbox pattern.
 
 ### 5.5 Delivery guarantees
@@ -201,6 +253,20 @@ over-count. It also covers concurrent duplicates: if two workers insert the same
 `provider_id` at once, Postgres makes the second wait for the first to commit, then its
 `DO NOTHING` applies, so exactly one worker updates the lead.
 
+**Proven under crashes (M3).** `loadtest/crash.sh` sends a fixed, seeded set of webhooks twice:
+once cleanly, and once while a random service (`ingest`, `attribution`, `inference` or
+`nats-server`) is killed with `kill -9` every 5–15 s, at least 20 times, and restarted by a
+supervisor (systemd on the server, a restart loop locally). k6 retries like a provider, with
+backoff until it gets a `200`, so every webhook is eventually accepted. Pass: identical row
+counts and an identical checksum over the ordered key fields of `interactions`, `leads` and
+`insights`.
+
+Killing the `nats-server` process loses nothing JetStream has acknowledged, because the
+operating system still holds its writes. A **power loss** could lose writes since JetStream's
+last disk sync (its `sync_interval`, documented default 2 minutes, verified when measured).
+M3 measures what `sync_interval: always` costs in edge latency, and the
+[decision record](decisions/0001-event-stream.md) records the trade-off.
+
 ## 6. Event schema
 
 Raw envelope published to the stream (JSON):
@@ -221,6 +287,42 @@ Raw envelope published to the stream (JSON):
 *Why keep the raw params:* the stream is the source of truth, so later consumers (or a fixed
 attribution bug) can reprocess history without asking the provider again.
 
+### 6.1 The schema as a contract (M3)
+
+The envelope is the interface between the team that owns ingestion and the teams that own
+consumers. M3 makes it an explicit, tested contract.
+
+- **The contract** is `schemas/lead-event/v1.schema.json` (JSON Schema 2020-12), with example
+  events in `schemas/lead-event/examples/v1.<minor>/`. JSON Schema is language-neutral, so a
+  consumer written in another language can validate against the same file.
+- **`schema_version`** stays the **major** version, the number `1`. Changing its type to carry
+  a minor version would itself break every consumer. Minor versions (`1.0`, `1.1`) are
+  releases of the schema file, and the publisher also sends the full version as a
+  `Schema-Version: 1.1` message header, for logs and debugging only. Consumers decide by the
+  major version.
+- **Compatibility rules:**
+  - A minor version only adds: new optional fields, or new values a consumer is told to expect.
+  - Consumers ignore fields they don't know (the tolerant reader).
+  - A breaking change is a new major version, published alongside the old one until every
+    consumer has moved.
+  - A consumer that receives a major version, or a channel, it doesn't support dead-letters the
+    message with the reason. It never crashes or guesses.
+- **v1.1 adds `channel: "email"`.** Adding an enum value looks additive but isn't safe for a
+  consumer that assumes only `voice` and `sms`; today the database's `CHECK` constraint would
+  reject it and the message would be retried five times before reaching the DLQ. The rule above
+  makes the behaviour explicit and tested. Email-only fields (`subject`, `attachment_count`) are
+  optional.
+- **Tests:**
+  - *Producer:* every envelope `ingest` builds validates against the current schema.
+  - *Consumer contract:* each consumer processes every example of every minor version it
+    supports, including one with an unknown field, and dead-letters an example with an
+    unsupported major version or channel.
+  - *Compatibility:* every example from every earlier minor version still validates against the
+    current schema, so an edit that breaks old messages fails CI.
+- *Why not Go struct tests alone:* they would tie the contract to Go. *Why not a contract
+  broker such as Pact:* it adds a service to run, which isn't justified for two consumers in
+  one repo.
+
 ## 7. Data model (Postgres)
 
 ```sql
@@ -231,7 +333,12 @@ interactions     (id PK, provider_id UNIQUE, lead_id FK NULL, channel, from_numb
                   campaign_id, source, occurred_at, ingested_at, raw JSONB)
 insights         (id PK, provider_id UNIQUE, intent, score, model_version, model_ms,
                   received_at, created_at)                                    -- M2
+tracking_addresses (address PK, campaign_id, source, medium, active)          -- M3
 ```
+
+M3 changes to `interactions`: `channel` also allows `email`; `to_e164` becomes nullable and a
+nullable `to_address` holds the tracking address an email was sent to; `from_number` holds the
+sender for every channel and is renamed `from_contact`.
 
 - `interactions` is the record of facts: one row per inbound call/SMS, with the campaign
   current *at the time*, never rewritten. Any attribution model (multi-touch included) can be
@@ -264,6 +371,64 @@ Migrations: plain numbered `.sql` files applied with `psql` (no migration tool t
 Uses the monitoring endpoint built into NATS and the k6 summary, so no Prometheus/Grafana
 install is needed.
 
+**M3 measurements**, recorded in [benchmarks](benchmarks.md) with the machine and method. The
+server rows use the environment in [section 13](#13-demo-environment-aws).
+
+| Measurement | Target or expectation |
+|---|---|
+| The M1/M2 1,000/s spike, on AWS | Same pass criteria: 0 lost, 0 duplicated, model p95 flat (±10%) |
+| Edge step-up test | Highest sustained rate with p99 < 50 ms and 0 errors; load generator CPU < 80% throughout, so the result measures the server, not k6 |
+| Attribution sustained throughput | Measured, with the bottleneck named |
+| Real model calibration (low rate) | p50/p95/p99 latency and the rate where `429`s start; the stub profile updated to match; accuracy on a labelled set |
+| CPU profile (`pprof`) of `ingest` and `attribution` during the spike | Share of time in our code versus waiting on I/O; the evidence for or against optimising code (or rewriting it in another language) |
+| Crash test | Identical counts and checksum after at least 20 kills |
+| Monitor | Detects the injected failure within 60 s; **0 alerts** during a normal spike run |
+| Replay recovery | Rows after replay equal the clean run |
+| `sync_interval: always` | Edge p99 against the default |
+
+### 8.1 Monitor and alerting (M3)
+
+A watchdog that alerts on a normal traffic spike gets ignored, so lag alone is never treated as
+a failure.
+
+`cmd/monitor` evaluates these rules every 5 seconds:
+
+| Rule | Detects | Fires when |
+|---|---|---|
+| **Arrivals stopped** | The edge or the provider is down | No **canary** row for 30 s. A canary is a signed synthetic voice webhook sent every 10 s from a reserved number to a reserved tracking number; reports exclude it. |
+| **Volume drop** | A partial outage upstream | The last 5 minutes' arrival rate is below 20% of the trailing hour's, and the trailing hour averaged at least 1/s |
+| **Acked but not written** | A consumer that stays up and acknowledges messages without writing them | Over 60 s, rows written are below 90% of messages the consumer acknowledged (from its ack floor), with at least 100 acknowledged |
+| **Stale backlog** | A consumer falling too far behind | The oldest pending message is more than 5 minutes old |
+
+- **Alerts** have firing and resolved states, are logged as structured events, and appear on
+  the status page. They go through an `Alerter` interface with three implementations: log
+  (always on), SendGrid Mail Send API v3, and optionally Amazon SES. An alerter that fails or
+  is slow never delays the rules: alerts are queued and sent with retry and backoff on `429`
+  and `5xx`.
+- **Status page:** arrivals per second, consumer lag and oldest pending age, model p95, time
+  to insight, alert history, and an **Outbox** of alert emails captured by `cmd/mailsink`.
+  Served on `localhost` only; there is no auth, so it is never exposed publicly.
+
+### 8.2 Mail sink (M3)
+
+`cmd/mailsink` stands in for SendGrid's Mail Send API, so the alert path can be shown
+end-to-end without an account (SendGrid no longer has a free plan, only a 60-day trial). It
+accepts `POST /v3/mail/send`, checks the bearer token and the request's shape against
+SendGrid's documented contract, returns `202` as SendGrid does, and keeps the messages for the
+status page. A real account is a configuration change: `SENDGRID_BASE_URL` and the API key.
+
+### 8.3 Fault injection and recovery (M3)
+
+- Fault injection exists only in binaries built with the `faultinject` build tag, so a normal
+  build can't contain it. In that build, `SIGUSR1` toggles `attribution` between normal and
+  **acknowledge without writing**: the process stays up, its health check passes and its lag
+  stays at zero, while nothing reaches Postgres.
+- Recovery is replay from the stream ([section 5.3](#53-attribution-consumer-cmdattribution)):
+  fix the cause, then `attribution -replay-from` a time just before the incident started.
+- A blameless postmortem of an injected incident on the server is written in
+  `docs/postmortems/`: timeline from logs, time to detect, impact (rows missing), recovery,
+  and follow-ups.
+
 ## 9. Local runtime (native, no Docker)
 
 | Service | Install | Start / stop |
@@ -278,11 +443,16 @@ Disk space is checked before each install. All of it is free and open source.
 ## 10. Repo layout
 
 ```
-cmd/ingest/        cmd/attribution/     (cmd/inference/ in M2)
+cmd/ingest/        cmd/attribution/     cmd/inference/ (M2)
+cmd/monitor/       cmd/mailsink/        (M3)
 internal/twilio/   signature verification
+internal/sendgrid/ Inbound Parse signature verification, Mail Send client (M3)
 internal/envelope/ schema + parsing
 internal/attribution/ lookup + DB writes
-migrations/        loadtest/ (k6 scripts)   docs/
+internal/monitor/  rules and alerters (M3)
+schemas/lead-event/ JSON Schema contract and examples (M3)
+infra/             AWS bootstrap scripts and OpenTofu demo environment (M3)
+migrations/        loadtest/ (k6 scripts)   docs/ (decisions/, postmortems/ from M3)
 ```
 
 Libraries: `nats.go` (`jetstream` package), `pgx/v5`, stdlib `log/slog`. Config via env vars.
@@ -290,8 +460,12 @@ Libraries: `nats.go` (`jetstream` package), `pgx/v5`, stdlib `log/slog`. Config 
 ## 11. Security & privacy
 
 - Signature verification on every webhook; body size cap.
-- Phone numbers are PII: logs show only the last 4 digits.
-- Twilio auth token comes from an env var and is never committed.
+- Phone numbers are PII: logs show only the last 4 digits. Email addresses are PII too: logs
+  show only the domain.
+- Twilio auth token comes from an env var and is never committed. So do SendGrid's public key
+  and API key, and the alert recipient address; on AWS they come from SSM Parameter Store
+  (SecureString), never from the instance's user data or the OpenTofu state.
+- The demo environment opens **no inbound ports**; see [section 13](#13-demo-environment-aws).
 
 ## 12. Decisions and known limitations
 
@@ -317,3 +491,53 @@ Known limitations (deliberately out of M1):
   undelivered but out of the DLQ. It isn't lost (it stays in `LEADS` for 7 days) and consumer
   metrics show it. The upgrade path is to capture JetStream's max-deliveries advisories in
   their own stream and dead-letter from there.
+
+Decisions and limitations added in M3:
+
+- **The event stream:** NATS JetStream against Kafka (self-managed, MSK, MSK Serverless) and
+  Kinesis, including cost at the measured load, is argued in
+  [decision record 0001](decisions/0001-event-stream.md). The same record covers rewriting hot
+  paths in C++: rejected unless the CPU profile shows our own code, not I/O, dominates.
+- **No cross-channel identity:** an email sender and a caller who are the same person are not
+  linked, and email senders get no `leads` row.
+- **Power loss** can lose JetStream writes since its last disk sync
+  ([section 5.5](#55-delivery-guarantees)); the cost of syncing every write is measured.
+- **The monitor is a single process.** If it dies, nothing alerts. In production it would run
+  outside the system it watches, with its own heartbeat to an external service ("who watches
+  the watchdog").
+
+## 13. Demo environment (AWS)
+
+An on-demand environment for server measurements and live demos. It exists only while in use,
+so it costs nothing between sessions.
+
+- **Account:** its own AWS account, `call-event-pipeline`, in the existing AWS Organization.
+  *Why:* a clean cost signal, a small blast radius, and teardown by closing the account.
+  Created with idempotent scripts in `infra/bootstrap/aws/`, which the owner runs once: the
+  account, sign-in through IAM Identity Center, and a **$10/month budget** with email alerts at
+  50% actual, 100% actual and 100% forecast. Member accounts in an Organization have no AWS free
+  tier.
+- **Why the budget alone isn't enough:** budget data updates only a few times a day, so it can
+  show cost but can't stop it. The guard is that **every instance terminates itself after 3
+  hours**: it is created with shutdown-means-terminate and schedules `shutdown -h +180` at boot.
+- **Infrastructure:** OpenTofu with local, git-ignored state, in `infra/demo/`. `tofu destroy`
+  removes everything it created; `infra/demo/check.sh` (read-only) lists anything tagged
+  `project=call-event-pipeline` that still exists.
+- **Two instances** in the default VPC, us-east-1:
+
+  | Role | Type | Runs |
+  |---|---|---|
+  | System under test | `c7g.xlarge` (4 vCPU, 8 GB, Graviton) | `nats-server`, Postgres (apt), the services and `monitor`, under systemd |
+  | Load generator | `c7g.large` (2 vCPU, 4 GB) | k6, `sendhook`, the canary |
+
+  *Why a separate load generator:* generating load on the machine being measured takes CPU
+  from it and distorts the result.
+- **No inbound ports.** Access is through AWS Systems Manager Session Manager, including
+  port-forwarding the status page to `localhost` for screen sharing.
+- **Build and deploy:** binaries are cross-compiled locally for `linux/arm64` and shipped
+  through a short-lived S3 bucket, so the private repository is never cloned onto the server.
+- **Commands:** `make demo-up`, `demo-spike`, `demo-crash`, `demo-fault`, `demo-down`, with a
+  10-minute walkthrough in `docs/demo.md`.
+- **Cost** (on-demand us-east-1, about $0.145/h + $0.0725/h, plus two public IPv4 addresses
+  and disks): about $0.23 an hour, so a 2-hour session is about $0.50. Rates are checked
+  against AWS's price list when the account is created.

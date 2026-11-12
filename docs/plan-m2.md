@@ -55,6 +55,7 @@ The spec sketches "first-touch leads before re-analysis". Three options:
 | C. Attribution publishes "first touch" / "repeat" events | Two inference consumers, each with its own pool | Real priority, but publishing after a database commit is the classic **dual-write** problem; doing it safely needs the **transactional outbox** pattern, a topic big enough for its own milestone |
 
 **Decision: A.** Priority lanes, with option C and the outbox pattern, are the core of M3.
+*(Later moved to an M4 candidate when M3 was scoped; see [M3 plan D1](plan-m3.md#decisions-agreed-before-starting).)*
 
 ### D5. What to measure
 
