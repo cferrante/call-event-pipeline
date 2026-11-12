@@ -241,7 +241,12 @@ real inbox moment is wanted in the demo; about $0.10 per 1,000 emails, checked f
 
 ## Deviations from the plan
 
-None yet.
+- **Step 1: integration tests can no longer pass by skipping in CI.** `dbtest` and `natstest`
+  skip a test when Postgres or `nats-server` is missing, and Go reports a skipped test as
+  `ok`, so a misconfigured CI job would have been green while testing nothing. New package
+  `internal/testenv` turns those skips into failures when `REQUIRE_INTEGRATION=1`, which CI
+  sets. Proven by running the attribution tests without `DATABASE_URL`: skipped (`ok`) by
+  default, `FAIL` with the variable set.
 
 ## Code-review outcomes
 

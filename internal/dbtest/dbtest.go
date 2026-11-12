@@ -15,17 +15,19 @@ import (
 
 	"github.com/cferrante/call-event-pipeline/internal/env"
 	"github.com/cferrante/call-event-pipeline/internal/migrate"
+	"github.com/cferrante/call-event-pipeline/internal/testenv"
 	"github.com/cferrante/call-event-pipeline/migrations"
 )
 
 // Empty creates a new, empty database named leads_test_<random> using DATABASE_URL's
-// credentials, and drops it when the test ends. The test is skipped if DATABASE_URL
-// isn't set.
+// credentials, and drops it when the test ends. If DATABASE_URL isn't set the test is
+// skipped, or fails under REQUIRE_INTEGRATION=1 (see package testenv).
 func Empty(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 	baseURL := os.Getenv("DATABASE_URL")
 	if baseURL == "" {
-		t.Skip("DATABASE_URL not set; run: set -a; source .env; set +a")
+		testenv.Missing(t, "DATABASE_URL not set; run: set -a; source .env; set +a")
+		return nil
 	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
