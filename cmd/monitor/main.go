@@ -1,7 +1,8 @@
 // Command monitor watches the pipeline from outside for silent failures (docs/design.md,
 // section 8.1): every few seconds it takes a reading of the stream, the consumers and the
 // database, evaluates the alert rules, logs alerts as they start and end, and serves a status
-// page on a loopback address. It also sends the canary webhook.
+// page on a loopback address. It also sends the canary webhook, and, when ALERT_EMAIL_TO is
+// set, emails alerts through SendGrid's Mail Send API or cmd/mailsink.
 package main
 
 import (
@@ -21,6 +22,7 @@ import (
 
 	"github.com/cferrante/call-event-pipeline/internal/env"
 	"github.com/cferrante/call-event-pipeline/internal/monitor"
+	"github.com/cferrante/call-event-pipeline/internal/sendgrid"
 )
 
 func main() {
@@ -56,7 +58,20 @@ func run() error {
 	if err != nil {
 		return err
 	}
-	svc := monitor.NewService(sampler, cfg.rules, logAlert)
+	// Alerts are always logged at once; email goes through a queue so a slow or failing mail
+	// API never delays the rules.
+	alert := logAlert
+	var outbox func() []monitor.Delivery
+	if e := cfg.email; e != nil {
+		q := monitor.NewQueue(monitor.EmailAlerter{
+			Sender: &sendgrid.Client{BaseURL: e.BaseURL, APIKey: e.APIKey, HTTP: &http.Client{Timeout: 15 * time.Second}},
+			From:   e.From, To: e.To, StatusURL: "http://" + cfg.addr,
+		}, monitor.DefaultQueueOptions)
+		go q.Run(ctx)
+		alert = func(ev monitor.Event) { logAlert(ev); q.Enqueue(ev) }
+		outbox = q.Outbox
+	}
+	svc := monitor.NewService(sampler, cfg.rules, alert)
 
 	go every(ctx, cfg.interval, func() { svc.Tick(ctx, time.Now()) })
 	if cfg.canaryInterval > 0 {
@@ -71,11 +86,11 @@ func run() error {
 		})
 	}
 
-	srv := &http.Server{Addr: cfg.addr, Handler: handler(svc), ReadHeaderTimeout: 5 * time.Second}
+	srv := &http.Server{Addr: cfg.addr, Handler: handler(svc, outbox), ReadHeaderTimeout: 5 * time.Second}
 	errc := make(chan error, 1)
 	go func() { errc <- srv.ListenAndServe() }()
 	slog.Info("monitor running", "status_page", "http://"+cfg.addr, "interval", cfg.interval,
-		"canary_interval", cfg.canaryInterval)
+		"canary_interval", cfg.canaryInterval, "alert_email", cfg.email != nil)
 
 	select {
 	case err := <-errc:

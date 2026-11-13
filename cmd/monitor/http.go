@@ -24,6 +24,14 @@ type statusView struct {
 	Active         []alertView
 	Recent         []eventView
 	SampleError    string `json:",omitempty"`
+	EmailOn        bool
+	Outbox         []deliveryView
+}
+
+type deliveryView struct {
+	Event, Rule, Subject, State, LastError string
+	Attempts                               int
+	Updated                                time.Time
 }
 
 type consumerView struct {
@@ -43,9 +51,14 @@ type eventView struct {
 	DurationSeconds              float64 `json:",omitempty"`
 }
 
-func view(st monitor.Status) statusView {
+func view(st monitor.Status, outbox []monitor.Delivery, emailOn bool) statusView {
 	v := statusView{At: st.At, ArrivalsPerSec: st.ArrivalsPerSec, SampleError: st.SampleError,
-		Consumers: map[string]consumerView{}, Active: []alertView{}, Recent: []eventView{}}
+		Consumers: map[string]consumerView{}, Active: []alertView{}, Recent: []eventView{},
+		EmailOn: emailOn, Outbox: []deliveryView{}}
+	for _, d := range outbox {
+		v.Outbox = append(v.Outbox, deliveryView{Event: string(d.Event.State), Rule: d.Event.Rule, Subject: d.Event.Subject,
+			State: string(d.State), LastError: d.LastError, Attempts: d.Attempts, Updated: d.Updated})
+	}
 	for name, c := range st.Consumers {
 		v.Consumers[name] = consumerView{Lag: c.Lag, OldestPendingSeconds: c.OldestPendingAge.Seconds(),
 			WrittenPerSec: c.WrittenPerSec}
@@ -61,7 +74,8 @@ func view(st monitor.Status) statusView {
 }
 
 // handler serves the status page and its JSON. The page polls /status every 2 seconds.
-func handler(svc *monitor.Service) http.Handler {
+// outbox lists alert emails; nil means email alerts are off.
+func handler(svc *monitor.Service, outbox func() []monitor.Delivery) http.Handler {
 	mux := http.NewServeMux()
 	for path, file := range map[string]string{"/{$}": "web/index.html", "/page.js": "web/page.js", "/page.css": "web/page.css"} {
 		body, _ := web.ReadFile(file) // embedded at build time, so it can't be missing
@@ -77,7 +91,11 @@ func handler(svc *monitor.Service) http.Handler {
 	mux.HandleFunc("GET /status", func(w http.ResponseWriter, _ *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		w.Header().Set("Cache-Control", "no-store")
-		_ = json.NewEncoder(w).Encode(view(svc.Status()))
+		var deliveries []monitor.Delivery
+		if outbox != nil {
+			deliveries = outbox()
+		}
+		_ = json.NewEncoder(w).Encode(view(svc.Status(), deliveries, outbox != nil))
 	})
 	return mux
 }

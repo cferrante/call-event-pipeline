@@ -53,6 +53,7 @@ go run ./cmd/attribution                  # 2. applies migrations, then consumes
 go run ./cmd/inference                    # 3. classifies events with the (stub) AI model
 go run ./cmd/ingest                       # 4. webhook endpoint on $INGEST_PORT
 go run ./cmd/monitor                      # 5. alerts + status page on http://127.0.0.1:8090
+go run ./cmd/mailsink                     # 6. receives the monitor's alert emails
 ```
 
 Stop any of them with Ctrl-C; each finishes in-flight work first.
@@ -65,6 +66,12 @@ The monitor sends a signed "canary" webhook every 10 seconds and alerts (in its 
 its status page) if the canary stops arriving, traffic drops far below normal, a consumer
 acknowledges messages without writing them, or a backlog stops draining. The page listens on
 `127.0.0.1` only, since it has no login.
+
+Alerts are also emailed through SendGrid's Mail Send API. Locally that is `cmd/mailsink`, which
+checks each request against SendGrid's documented contract, answers `202` as SendGrid does, and
+keeps the messages: `curl -s 127.0.0.1:8025/messages`. The status page's **Outbox** shows each
+alert email and how delivery went (sent, retrying after a `429` or `5xx`, or failed). Unset
+`ALERT_EMAIL_TO` to turn email off.
 
 **Try it**
 

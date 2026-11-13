@@ -8,7 +8,8 @@ import (
 func setEnv(t *testing.T, kv map[string]string) {
 	t.Helper()
 	for _, k := range []string{"MONITOR_ADDR", "MONITOR_INTERVAL", "CANARY_INTERVAL", "CANARY_MAX_AGE",
-		"INGEST_URL", "INGEST_PORT", "INGEST_PUBLIC_URL", "TWILIO_AUTH_TOKEN", "DATABASE_URL", "NATS_URL"} {
+		"INGEST_URL", "INGEST_PORT", "INGEST_PUBLIC_URL", "TWILIO_AUTH_TOKEN", "DATABASE_URL", "NATS_URL",
+		"ALERT_EMAIL_TO", "ALERT_EMAIL_FROM", "SENDGRID_BASE_URL", "SENDGRID_API_KEY"} {
 		t.Setenv(k, "")
 	}
 	for k, v := range kv {
@@ -72,5 +73,46 @@ func TestConfigRejectsBadValues(t *testing.T) {
 	setEnv(t, map[string]string{"TWILIO_AUTH_TOKEN": "tok"})
 	if _, err := loadConfig(); err == nil {
 		t.Error("missing DATABASE_URL accepted")
+	}
+}
+
+// Alert emails are off unless a recipient is set; once one is, every setting the send needs
+// must be there too, and there is no default base URL, so a development machine can't email
+// through real SendGrid by accident.
+func TestAlertEmailConfig(t *testing.T) {
+	setEnv(t, baseEnv)
+	if cfg, err := loadConfig(); err != nil || cfg.email != nil {
+		t.Fatalf("without ALERT_EMAIL_TO: email %+v, err %v; want off", cfg.email, err)
+	}
+	full := map[string]string{"ALERT_EMAIL_TO": "oncall@example.com", "ALERT_EMAIL_FROM": "monitor@example.com",
+		"SENDGRID_BASE_URL": "http://127.0.0.1:8025", "SENDGRID_API_KEY": "SG.k"}
+	env := map[string]string{}
+	for k, v := range baseEnv {
+		env[k] = v
+	}
+	for k, v := range full {
+		env[k] = v
+	}
+	setEnv(t, env)
+	cfg, err := loadConfig()
+	if err != nil || cfg.email == nil || cfg.email.To != "oncall@example.com" || cfg.email.From != "monitor@example.com" ||
+		cfg.email.BaseURL != "http://127.0.0.1:8025" || cfg.email.APIKey != "SG.k" {
+		t.Fatalf("email %+v, err %v", cfg.email, err)
+	}
+	for _, missing := range []string{"ALERT_EMAIL_FROM", "SENDGRID_BASE_URL", "SENDGRID_API_KEY"} {
+		e := map[string]string{}
+		for k, v := range env {
+			e[k] = v
+		}
+		delete(e, missing)
+		setEnv(t, e)
+		if _, err := loadConfig(); err == nil {
+			t.Errorf("ALERT_EMAIL_TO set without %s accepted", missing)
+		}
+	}
+	env["ALERT_EMAIL_TO"] = "not-an-address"
+	setEnv(t, env)
+	if _, err := loadConfig(); err == nil {
+		t.Error("an invalid ALERT_EMAIL_TO accepted")
 	}
 }
