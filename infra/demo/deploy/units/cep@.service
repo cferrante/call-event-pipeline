@@ -1,0 +1,17 @@
+[Unit]
+Description=call-event-pipeline %i
+Requires=cep-secrets.service
+After=cep-secrets.service nats.service postgresql.service
+
+[Service]
+User=cep
+EnvironmentFile=/etc/cep/config.env
+# Secrets, fetched by cep-secrets.service; root-only and in memory. systemd reads it before
+# dropping to the cep user, so the services never need to read the file themselves.
+EnvironmentFile=/run/cep/env
+ExecStart=/opt/cep/bin/%i
+Restart=on-failure
+RestartSec=1
+
+[Install]
+WantedBy=multi-user.target

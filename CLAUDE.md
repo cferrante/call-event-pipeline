@@ -83,6 +83,8 @@ no Docker. Load the environment first in every terminal: `set -a; source .env; s
   without the inference limit, as the comparison.
 - `./loadtest/crash.sh`: crash test, `kill -9` of random services under load with a restart
   loop; checks the data is exactly what the webhooks imply. `KILLS=0` is the clean run.
+- `make demo-up` / `demo-down` / `demo-check`: the AWS demo environment
+  ([infra/demo](infra/demo/README.md)); `make demo-test` runs its offline tests.
 - `gofmt -l .` and `go vet ./...` before every commit.
 
 ## Architecture

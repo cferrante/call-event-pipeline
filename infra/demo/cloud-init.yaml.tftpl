@@ -1,0 +1,33 @@
+#cloud-config
+# Demo instance: ${role}. Prepares the machine; `make demo-up` then ships the release and
+# starts the services through Systems Manager.
+
+# The cost guard runs first and at every boot, before anything that could fail: a timer
+# powers the instance off ${expiry_seconds} s after its first boot, and the instance is
+# created to terminate on power-off. The deadline is kept on disk, so a reboot doesn't
+# restart the clock. --no-block matters: bootcmd runs before sysinit.target, which a timer
+# waits for, so waiting for the timer to start would deadlock the boot.
+bootcmd:
+  - |
+    deadline=/var/lib/demo-expiry
+    [ -s "$deadline" ] || echo $(( $(date +%s) + ${expiry_seconds} )) > "$deadline"
+    left=$(( $(cat "$deadline") - $(date +%s) ))
+    [ "$left" -gt 60 ] || left=60
+    systemd-run --unit=demo-expiry --no-block --on-active="$left"s /bin/systemctl poweroff
+
+package_update: true
+packages:
+%{ if role == "sut" ~}
+  - postgresql
+%{ endif ~}
+  - curl
+
+snap:
+  commands:
+    - snap install aws-cli --classic
+
+write_files:
+  - path: /etc/cep/instance.env
+    content: |
+      ROLE=${role}
+      AWS_DEFAULT_REGION=${region}
