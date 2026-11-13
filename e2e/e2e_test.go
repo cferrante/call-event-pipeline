@@ -38,7 +38,7 @@ import (
 
 const authToken = "e2e-token"
 
-var ingestBin, attributionBin, monitorBin, inferenceBin string
+var ingestBin, attributionBin, monitorBin, inferenceBin, mailsinkBin, attributionFaultBin string
 
 // TestMain builds both services once for all tests.
 func TestMain(m *testing.M) {
@@ -51,11 +51,15 @@ func TestMain(m *testing.M) {
 	attributionBin = filepath.Join(dir, "attribution")
 	inferenceBin = filepath.Join(dir, "inference")
 	monitorBin = filepath.Join(dir, "monitor")
+	mailsinkBin = filepath.Join(dir, "mailsink")
+	attributionFaultBin = filepath.Join(dir, "attribution-faultinject")
 	for bin, pkg := range map[string]string{
 		ingestBin: "../cmd/ingest", attributionBin: "../cmd/attribution", inferenceBin: "../cmd/inference",
-		monitorBin: "../cmd/monitor",
+		monitorBin: "../cmd/monitor", mailsinkBin: "../cmd/mailsink",
+		attributionFaultBin: "-tags=faultinject ../cmd/attribution",
 	} {
-		if out, err := exec.Command("go", "build", "-o", bin, pkg).CombinedOutput(); err != nil {
+		args := append([]string{"build", "-o", bin}, strings.Fields(pkg)...)
+		if out, err := exec.Command("go", args...).CombinedOutput(); err != nil {
 			fmt.Fprintf(os.Stderr, "build %s: %v\n%s", pkg, err, out)
 			os.Exit(1)
 		}
@@ -187,7 +191,12 @@ func (e env) startIngest(t *testing.T) *process {
 
 func (e env) startAttribution(t *testing.T) *process {
 	t.Helper()
-	p := start(t, "attribution", attributionBin, "DATABASE_URL="+e.dbURL, "NATS_URL="+e.natsURL)
+	return e.startAttributionBin(t, attributionBin)
+}
+
+func (e env) startAttributionBin(t *testing.T, bin string) *process {
+	t.Helper()
+	p := start(t, "attribution", bin, "DATABASE_URL="+e.dbURL, "NATS_URL="+e.natsURL)
 	eventually(t, "attribution to apply migrations", func() bool {
 		return e.count(t, "SELECT count(*) FROM pg_tables WHERE tablename = 'interactions'") == 1
 	})

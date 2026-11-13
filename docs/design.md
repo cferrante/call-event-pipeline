@@ -439,7 +439,9 @@ never sends through real SendGrid by accident.
 - Fault injection exists only in binaries built with the `faultinject` build tag, so a normal
   build can't contain it. In that build, `SIGUSR1` toggles `attribution` between normal and
   **acknowledge without writing**: the process stays up, its health check passes and its lag
-  stays at zero, while nothing reaches Postgres.
+  stays at zero, while nothing reaches Postgres. A test checks that a normal build contains
+  none of this code. `MONITOR_WRITE_WINDOW` shortens the rule's minute-long window for a quick
+  drill or test.
 - Recovery is replay from the stream ([section 5.3](#53-attribution-consumer-cmdattribution)):
   fix the cause, then `attribution -replay-from` a time just before the incident started.
 - A blameless postmortem of an injected incident on the server is written in

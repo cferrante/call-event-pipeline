@@ -355,6 +355,22 @@ real inbox moment is wanted in the demo; about $0.10 per 1,000 emails, checked f
   the failure and the two still arrived in order. The test now fails the *firing* event's first
   attempt, and parallel delivery fails it.
 
+- **Step 10: the e2e test shortens the rule's window to 3 s.** The rule needs a full window of
+  readings from before the fault, so with the default minute the test would take well over a
+  minute. A new `MONITOR_WRITE_WINDOW` setting shortens it, and the test detected the fault
+  in about 0.4 s at 100 events/s (3 runs in parallel). The 60-second target with default
+  settings is measured on the server (steps 16 and 17).
+- **Step 10: the canary catches this fault too.** The canary's rows go through attribution,
+  so while it acknowledges without writing, *arrivals stopped* also fires after its 30 s.
+  The dedicated rule is faster and names the consumer; the canary is the end-to-end backstop.
+- **Step 10: the symbol-absence test first checked the wrong name.** It looked for
+  `main.silentWrites`, but Go names a method `main.(*silentWrites).Record`, so the check would
+  have passed for any build. The test first asserts that the tagged build *does* contain the
+  symbol, which exposed this; it now matches `silentWrites`, and a deliberate break (the fault
+  compiled into every build) fails it.
+- **Step 10: CI vets the tagged build,** so fault code that compiles only under `faultinject`
+  can't break unnoticed.
+
 ## Code-review outcomes
 
 None yet.

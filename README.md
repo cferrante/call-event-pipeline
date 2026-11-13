@@ -96,6 +96,21 @@ Email is simulated against SendGrid's Inbound Parse contract: `scripts/env-setup
 key pair, `sendhook` signs with the private key and ingest verifies with the public one
 (`SENDGRID_PUBLIC_KEY`; without it the email route is off).
 
+**Drill: a silent failure**
+
+A build with the `faultinject` tag lets you break attribution on purpose: `SIGUSR1` makes it
+acknowledge events without writing them, so it stays up with zero lag while nothing reaches
+Postgres. Normal builds don't contain this code.
+
+```bash
+go build -tags faultinject -o /tmp/attribution-drill ./cmd/attribution
+/tmp/attribution-drill                      # in place of go run ./cmd/attribution
+pkill -USR1 -f attribution-drill            # fault on; again to turn it off
+```
+
+With traffic flowing, the monitor fires *acked but not written* (and, 30 s later, *arrivals
+stopped*, since the canary's rows aren't written either) and emails the alert to the mail sink.
+
 **Test**
 
 ```bash
