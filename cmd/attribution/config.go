@@ -1,7 +1,9 @@
 package main
 
 import (
+	"fmt"
 	"log/slog"
+	"time"
 
 	"github.com/cferrante/call-event-pipeline/internal/env"
 )
@@ -26,4 +28,14 @@ func (c config) LogValue() slog.Value {
 		slog.String("database_url", env.Redact(c.databaseURL)),
 		slog.String("nats_url", c.natsURL),
 	)
+}
+
+// parseReplayFrom reads -replay-from: an RFC 3339 time with its zone, such as
+// 2026-11-13T09:30:00Z, so a replay never starts an hour off.
+func parseReplayFrom(s string) (time.Time, error) {
+	t, err := time.Parse(time.RFC3339Nano, s)
+	if err != nil {
+		return time.Time{}, fmt.Errorf("-replay-from must be an RFC 3339 time such as 2026-11-13T09:30:00Z, got %q", s)
+	}
+	return t, nil
 }

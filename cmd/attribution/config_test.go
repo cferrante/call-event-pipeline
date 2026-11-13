@@ -3,6 +3,7 @@ package main
 import (
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestLoadConfig(t *testing.T) {
@@ -40,5 +41,18 @@ func TestConfigLogValueHidesDatabasePassword(t *testing.T) {
 	}
 	if !strings.Contains(got, "leads_app") {
 		t.Errorf("logged config = %s, want the redacted URL kept for debugging", got)
+	}
+}
+
+// -replay-from takes an RFC 3339 time, so there is no doubt about its time zone.
+func TestParseReplayFrom(t *testing.T) {
+	got, err := parseReplayFrom("2026-11-13T09:30:00Z")
+	if err != nil || !got.Equal(time.Date(2026, 11, 13, 9, 30, 0, 0, time.UTC)) {
+		t.Errorf("got %v, %v", got, err)
+	}
+	for _, bad := range []string{"", "yesterday", "2026-11-13 09:30", "09:30"} {
+		if _, err := parseReplayFrom(bad); err == nil {
+			t.Errorf("%q accepted", bad)
+		}
 	}
 }

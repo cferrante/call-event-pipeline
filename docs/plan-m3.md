@@ -378,6 +378,17 @@ real inbox moment is wanted in the demo; about $0.10 per 1,000 emails, checked f
 - **Step 10: CI vets the tagged build,** so fault code that compiles only under `faultinject`
   can't break unnoticed.
 
+- **Step 11: replay reads up to the last message as of its start.** "To the stream's end"
+  would never end while traffic flows; the durable consumer owns anything published later.
+  Its consumer has no acks and is deleted when done, with a 5-minute inactivity limit as the
+  fallback if the process dies. Unparseable messages are skipped and counted (they were
+  dead-lettered the first time) rather than dead-lettered again; a write that keeps failing
+  stops the replay with an error, and re-running it is safe.
+- **Step 11: the clean-run comparison includes each lead's first and last touch.** Replay
+  writes the gap's events after later ones, so the test also shows that lead attribution
+  doesn't depend on processing order. The new e2e tests ran 48 times without failure with 8
+  parallel runs on 2 cores, the contention that exposed the earlier flake.
+
 ## Code-review outcomes
 
 None yet.

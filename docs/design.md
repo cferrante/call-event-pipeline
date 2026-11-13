@@ -169,8 +169,11 @@ demos, alert emails go to `cmd/mailsink`, a stand-in for SendGrid's Mail Send AP
   - **Unsupported schema version or channel** (M3) → dead letter at once, with the reason, so
     an upgraded consumer can replay it ([section 6](#6-event-schema)).
 - **Replay (M3):** `attribution -replay-from <RFC 3339 time>` creates a temporary consumer that
-  starts at that time, reprocesses everything up to the stream's end, then deletes itself. The
-  durable `attribution` consumer is untouched. Because every write is idempotent, already
+  starts at that time, reprocesses everything up to the stream's last message as of the
+  start (later ones are the durable consumer's), then deletes itself; if the process dies
+  first, the server removes it after 5 idle minutes. Messages that can't be parsed are skipped
+  and counted, as they were dead-lettered the first time. The durable `attribution` consumer
+  is untouched, so the service keeps running during a replay. Because every write is idempotent, already
   written messages are no-ops, so replay is the recovery for any period when writes went
   missing ([section 8.3](#83-fault-injection-and-recovery-m3)).
 

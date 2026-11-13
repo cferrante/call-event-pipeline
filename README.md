@@ -111,6 +111,13 @@ pkill -USR1 -f attribution-drill            # fault on; again to turn it off
 With traffic flowing, the monitor fires *acked but not written* (and, 30 s later, *arrivals
 stopped*, since the canary's rows aren't written either) and emails the alert to the mail sink.
 
+To recover, turn the fault off and replay the stream from just before it started. Only the
+missing rows are written, and attribution can keep running meanwhile:
+
+```bash
+go run ./cmd/attribution -replay-from 2026-11-13T09:30:00Z   # logs read, recorded, already_recorded
+```
+
 **Test**
 
 ```bash
