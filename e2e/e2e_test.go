@@ -12,6 +12,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io/fs"
 	"mime/multipart"
 	"net"
 	"net/http"
@@ -34,6 +35,7 @@ import (
 	"github.com/cferrante/call-event-pipeline/internal/natstest"
 	"github.com/cferrante/call-event-pipeline/internal/sendgrid"
 	"github.com/cferrante/call-event-pipeline/internal/twilio"
+	"github.com/cferrante/call-event-pipeline/migrations"
 )
 
 const authToken = "e2e-token"
@@ -197,8 +199,14 @@ func (e env) startAttribution(t *testing.T) *process {
 func (e env) startAttributionBin(t *testing.T, bin string) *process {
 	t.Helper()
 	p := start(t, "attribution", bin, "DATABASE_URL="+e.dbURL, "NATS_URL="+e.natsURL)
-	eventually(t, "attribution to apply migrations", func() bool {
-		return e.count(t, "SELECT count(*) FROM pg_tables WHERE tablename = 'interactions'") == 1
+	// Wait for every migration, not just the first table: each migration commits on its own,
+	// so a test that seeds a later migration's table could otherwise run before it exists.
+	all, err := fs.Glob(migrations.FS, "*.sql")
+	if err != nil {
+		t.Fatal(err)
+	}
+	eventually(t, "attribution to apply all migrations", func() bool {
+		return e.count(t, "SELECT count(*) FROM schema_migrations") == len(all)
 	})
 	return p
 }
