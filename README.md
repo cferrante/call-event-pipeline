@@ -125,6 +125,8 @@ go test ./...                     # unit tests; no services needed
 go test -tags integration -count=1 ./...   # plus integration and end-to-end tests; needs .env loaded
 ./loadtest/run.sh                 # spike test (needs k6), isolated from your dev data
 MODE=control ./loadtest/run.sh    # same spike without the inference limit: the model overloads
+./loadtest/crash.sh               # kill -9 random services under load (~5 min); data must be exact
+KILLS=0 ./loadtest/crash.sh       # the same load without kills: the clean run
 ```
 
 Integration tests start their own NATS server and throwaway databases. `-count=1` turns off

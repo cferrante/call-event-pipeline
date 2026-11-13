@@ -266,13 +266,16 @@ over-count. It also covers concurrent duplicates: if two workers insert the same
 `provider_id` at once, Postgres makes the second wait for the first to commit, then its
 `DO NOTHING` applies, so exactly one worker updates the lead.
 
-**Proven under crashes (M3).** `loadtest/crash.sh` sends a fixed, seeded set of webhooks twice:
-once cleanly, and once while a random service (`ingest`, `attribution`, `inference` or
-`nats-server`) is killed with `kill -9` every 5–15 s, at least 20 times, and restarted by a
-supervisor (systemd on the server, a restart loop locally). k6 retries like a provider, with
-backoff until it gets a `200`, so every webhook is eventually accepted. Pass: identical row
-counts and an identical checksum over the ordered key fields of `interactions`, `leads` and
-`insights`.
+**Proven under crashes (M3).** `loadtest/crash.sh` sends a fixed set of webhooks, each a pure
+function of its sequence number, while a random service (`ingest`, `attribution`, `inference`
+or `nats-server`) is killed with `kill -9` every 5–15 s from a seeded sequence, at least 20
+times, and restarted by a supervisor (systemd on the server, a restart loop locally). k6
+retries like a provider, with backoff until it gets a `200`, so every webhook is eventually
+accepted. Pass: no missing or unexpected rows, and an identical checksum over the ordered key
+fields of `interactions`, each one's lead and its insight, against the expected data computed
+in SQL from the sequence numbers. `KILLS=0` is the clean run, which must give the same
+checksum. A lead's first and last touch are left out: retries during an outage legitimately
+change the order calls arrive in.
 
 Killing the `nats-server` process loses nothing JetStream has acknowledged, because the
 operating system still holds its writes. A **power loss** could lose writes since JetStream's
