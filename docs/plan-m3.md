@@ -237,6 +237,29 @@ On branch `m3-spec`; merged before any code. The spec changes are in
 `SESAlerter` behind the same interface, in SES's sandbox (verified recipient only). Only if a
 real inbox moment is wanted in the demo; about $0.10 per 1,000 emails, checked first.
 
+## Progress
+
+What each step proved, with its PR. Updated in each step's PR; the evidence is in the
+deviations below and in [benchmarks](benchmarks.md).
+
+| Step | PR | What it proves |
+|---|---|---|
+| 0: spec and plan | [#7](https://github.com/cferrante/call-event-pipeline/pull/7) | M3's goals and steps agreed before code |
+| 1: CI | [#9](https://github.com/cferrante/call-event-pipeline/pull/9) | Every PR runs format, vet, unit and integration tests against real NATS and Postgres, and can't pass by silently skipping them |
+| 2: schema contract | [#10](https://github.com/cferrante/call-event-pipeline/pull/10) | The event's shape is published and tested; a breaking change fails the build |
+| 3: consumers on the contract | [#11](https://github.com/cferrante/call-event-pipeline/pull/11) | Every published example is processed by both consumers; unknown versions are dead-lettered on first delivery |
+| 4: SendGrid signatures | [#12](https://github.com/cferrante/call-event-pipeline/pull/12) | Inbound email is verified as SendGrid signs it; tampering is rejected |
+| 6: email consumers | [#13](https://github.com/cferrante/call-event-pipeline/pull/13) | Email is attributed to its campaign and classified; voice and SMS unchanged |
+| 5: email edge | [#14](https://github.com/cferrante/call-event-pipeline/pull/14) | Signed emails up to 30 MB are accepted without buffering attachments; retries are deduplicated |
+| 7: monitor rules | [#15](https://github.com/cferrante/call-event-pipeline/pull/15) | Each rule fires on its failure and none fires on a normal spike or a sustained burst |
+| 8: monitor service | [#16](https://github.com/cferrante/call-event-pipeline/pull/16) | Stopping the edge fires *arrivals stopped* within seconds and resolves on restart |
+| 9: alert email | [#17](https://github.com/cferrante/call-event-pipeline/pull/17) | Alerts are emailed through a SendGrid-compatible API; a slow or failing mail service never delays the checks |
+| 10: fault drill | [#18](https://github.com/cferrante/call-event-pipeline/pull/18) | A silent write failure is detected (≈0.4 s with a 3 s window) and emailed; normal builds don't contain the fault |
+| (fix) | [#19](https://github.com/cferrante/call-event-pipeline/pull/19) | A flaky e2e helper, reproduced 27/120 under CPU contention, fixed to 0/120 |
+| 11: replay | [#20](https://github.com/cferrante/call-event-pipeline/pull/20) | Replaying an injected gap restores exactly a clean run's data; a second replay changes nothing |
+| 12: crash test | [#21](https://github.com/cferrante/call-event-pipeline/pull/21) | 23 `kill -9`s under 100/s: 24,001 webhooks, none lost or duplicated, identical to the clean run; acking before saving loses data |
+| 13: AWS bootstrap 🧑 | [#22](https://github.com/cferrante/call-event-pipeline/pull/22) | Scripts ready and tested offline; the owner is running them |
+
 ## Deviations from the plan
 
 - **Step 1: integration tests can no longer pass by skipping in CI.** `dbtest` and `natstest`

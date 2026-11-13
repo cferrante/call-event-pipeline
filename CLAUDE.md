@@ -26,9 +26,9 @@ before concluding something does or doesn't exist.
 - `docs/design.md` is the spec: architecture, event schema, data model, delivery guarantees, and
   [decisions and known limitations](docs/design.md#12-decisions-and-known-limitations).
 - `docs/plan-m<N>.md` is the step-by-step plan for each milestone. Each step names the test that
-  must fail first. Each plan also holds the **deviations log**, **code-review outcomes** and
-  **spike-test results**: every change from the plan and every review outcome gets a row there,
-  in the same PR.
+  must fail first. Each plan also holds a **progress** table (step, PR, what it proves), the
+  **deviations log**, **code-review outcomes** and **spike-test results**: each finished step,
+  every change from the plan and every review outcome gets a row there, in the same PR.
 - `docs/benchmarks.md` holds targets and measured results, with the method used.
 - `docs/concepts.md` explains NATS, JetStream and the patterns used. Link to it rather than
   re-explaining a term.
