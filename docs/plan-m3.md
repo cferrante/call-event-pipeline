@@ -258,7 +258,7 @@ deviations below and in [benchmarks](benchmarks.md).
 | (fix) | [#19](https://github.com/cferrante/call-event-pipeline/pull/19) | A flaky e2e helper, reproduced 27/120 under CPU contention, fixed to 0/120 |
 | 11: replay | [#20](https://github.com/cferrante/call-event-pipeline/pull/20) | Replaying an injected gap restores exactly a clean run's data; a second replay changes nothing |
 | 12: crash test | [#21](https://github.com/cferrante/call-event-pipeline/pull/21) | 23 `kill -9`s under 100/s: 24,001 webhooks, none lost or duplicated, identical to the clean run; acking before saving loses data |
-| 13: AWS bootstrap 🧑 | [#22](https://github.com/cferrante/call-event-pipeline/pull/22) | Scripts ready and tested offline; the owner is running them |
+| 13: AWS bootstrap 🧑 | [#22](https://github.com/cferrante/call-event-pipeline/pull/22), [#24](https://github.com/cferrante/call-event-pipeline/pull/24) | Account, sign-in, $10 budget and Groq key exist: `check.sh` went from ✗ (exit 1) to "Bootstrap complete" (exit 0). A 3-hour demo session costs $0.70 at today's prices, so 14 fit in the budget |
 
 ## Deviations from the plan
 
@@ -442,6 +442,15 @@ deviations below and in [benchmarks](benchmarks.md).
 - **Step 13: prices come from the Price List API at the owner's sign-in.** `prices.sh` reads the
   on-demand prices of both instance types and gp3 storage and prints a session's cost; it needs
   a signed-in profile, so it runs during the owner's steps.
+- **Step 13: done on 2026-11-13.** The owner ran the scripts; `check.sh`, run again by Claude,
+  reports every step ✓. The account's root email is a Gmail plus-address for now; moving it to
+  an address on `cferrante.dev` later is optional Phase 11 in cferrante-dev's plan (two CLI
+  calls from the management account).
+- **Step 13: prices from the Price List API, 2026-11-13, us-east-1 on demand:** c7g.xlarge
+  $0.145/hour, c7g.large $0.0725/hour, gp3 $0.08/GB-month, public IPv4 $0.005/hour per address.
+  The first estimate left out the public IPv4 charge, which the instances need to reach
+  Session Manager without paid VPC endpoints; `prices.sh` now includes it: **$0.70 per 3-hour
+  session**, 14 within the $10 budget.
 
 ## Code-review outcomes
 
