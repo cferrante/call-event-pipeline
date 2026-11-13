@@ -408,6 +408,18 @@ real inbox moment is wanted in the demo; about $0.10 per 1,000 emails, checked f
   restart, within ingest's timeout, so the sender never sees a failure. Killing ingest does
   cause retries (170 in the full run).
 
+- **Step 13: two of cferrante-dev's six scripts aren't needed.** The Organization and Identity
+  Center already exist, and this project has no domain, so the scripts are the account, access,
+  budget and Groq key, renumbered 01–04; `check.sh` still confirms the Organization.
+- **Step 13: `check.sh` exits non-zero while any step is not done,** so "fails before the
+  scripts are run" is an exit code, not a reading of ✗ marks. It is tested offline with a fake
+  `aws` on `PATH` in four states (not signed in, fresh, alerts at the wrong thresholds, done);
+  dropping the final `exit 1` fails the test. It also checks the alerts are exactly 50% and
+  100% actual and 100% forecast, not just that three exist.
+- **Step 13: prices come from the Price List API at the owner's sign-in.** `prices.sh` reads the
+  on-demand prices of both instance types and gp3 storage and prints a session's cost; it needs
+  a signed-in profile, so it runs during the owner's steps.
+
 ## Code-review outcomes
 
 None yet.
