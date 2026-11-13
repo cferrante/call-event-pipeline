@@ -3,6 +3,8 @@ package main
 import (
 	"fmt"
 	"net"
+	"net/mail"
+	"net/url"
 	"os"
 	"strings"
 	"time"
@@ -21,7 +23,10 @@ type config struct {
 	ingestURL      string // INGEST_URL: where to send the canary
 	publicURL      string // INGEST_PUBLIC_URL: what the canary's signature covers
 	authToken      string // TWILIO_AUTH_TOKEN
+	email          *emailConfig
 }
+
+type emailConfig struct{ To, From, BaseURL, APIKey string }
 
 // loadConfig reads and validates the environment, so a mistake stops the monitor at startup.
 func loadConfig() (config, error) {
@@ -49,10 +54,37 @@ func loadConfig() (config, error) {
 	if cfg.rules.CanaryMaxAge, err = duration("CANARY_MAX_AGE", cfg.rules.CanaryMaxAge, false); err != nil {
 		return config{}, err
 	}
+	if cfg.email, err = loadEmail(); err != nil {
+		return config{}, err
+	}
 	if cfg.canaryInterval > 0 && (cfg.authToken == "" || cfg.publicURL == "") {
 		return config{}, fmt.Errorf("the canary needs TWILIO_AUTH_TOKEN and INGEST_PUBLIC_URL (or CANARY_INTERVAL=0 to turn it off)")
 	}
 	return cfg, nil
+}
+
+// loadEmail reads the alert email settings. Email is off unless ALERT_EMAIL_TO is set. There
+// is deliberately no default SENDGRID_BASE_URL: pointing at real SendGrid is a choice made in
+// .env, never something a development machine does by default.
+func loadEmail() (*emailConfig, error) {
+	to := os.Getenv("ALERT_EMAIL_TO")
+	if to == "" {
+		return nil, nil
+	}
+	e := &emailConfig{To: to, From: os.Getenv("ALERT_EMAIL_FROM"),
+		BaseURL: os.Getenv("SENDGRID_BASE_URL"), APIKey: os.Getenv("SENDGRID_API_KEY")}
+	for name, v := range map[string]string{"ALERT_EMAIL_TO": e.To, "ALERT_EMAIL_FROM": e.From} {
+		if a, err := mail.ParseAddress(v); err != nil || a.Address != v {
+			return nil, fmt.Errorf("%s must be a plain email address such as oncall@example.com, got %q", name, v)
+		}
+	}
+	if u, err := url.Parse(e.BaseURL); err != nil || (u.Scheme != "http" && u.Scheme != "https") || u.Host == "" {
+		return nil, fmt.Errorf("alert email needs SENDGRID_BASE_URL (http://127.0.0.1:8025 for cmd/mailsink, https://api.sendgrid.com for SendGrid)")
+	}
+	if e.APIKey == "" {
+		return nil, fmt.Errorf("alert email needs SENDGRID_API_KEY")
+	}
+	return e, nil
 }
 
 // loopbackOnly refuses any listen address beyond this machine: the status page has no login,

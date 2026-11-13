@@ -332,6 +332,29 @@ real inbox moment is wanted in the demo; about $0.10 per 1,000 emails, checked f
   shell, failing once `.env` had the key; it passed in step 5 and in CI only because neither
   environment had it yet.
 
+- **Step 9: the Outbox shows the sender's view, not the mail sink's.** The plan had
+  `cmd/mailsink` feed the status page. Instead the monitor's alert queue records each email's
+  delivery (queued, sent, retrying with the last error, failed, dropped), and the sink lists
+  what it received at `GET /messages`. The sender's view keeps working against real SendGrid,
+  where there is no sink to ask, and it shows retries and failures, which the sink never sees.
+- **Step 9: SendGrid's Mail Send contract, from its docs.** Sources: "Mail Send" (modified
+  2025-09-25), "Rate limits" (2026-07-02) and "Responses" (2025-11-12). `POST /v3/mail/send`,
+  `Authorization: Bearer`, `personalizations` (1 to 1,000, each with `to`) and `from` required,
+  `202` on success, errors as `{"errors":[{"message","field"}]}`. A `429` carries
+  `X-RateLimit-Reset`; the docs show epoch seconds in an example without stating the unit, so
+  that is an inference. The queue waits until the reset (capped at the 60 s maximum backoff)
+  before retrying.
+- **Step 9: the integration is client-to-sink over HTTP, not a test against services.** Neither
+  side touches NATS or Postgres, so a test of our client against the real sink handler on a
+  local socket is the integration; the full path, monitor to sink, is step 10's e2e test. A
+  manual run confirmed it: with inference stopped, *stale backlog* fired and its email reached
+  the sink on the first attempt.
+- **Step 9: a test that missed its deliberate break, fixed.** The ordering test failed the
+  first delivery attempt, whichever event it was for. Delivering in parallel didn't break it,
+  because Go's scheduler tends to run the newest goroutine first, so the *resolved* event took
+  the failure and the two still arrived in order. The test now fails the *firing* event's first
+  attempt, and parallel delivery fails it.
+
 ## Code-review outcomes
 
 None yet.

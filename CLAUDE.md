@@ -72,6 +72,8 @@ no Docker. Load the environment first in every terminal: `set -a; source .env; s
 - `go run ./cmd/attribution`, `./cmd/inference`, `./cmd/ingest`, `./cmd/monitor`: the
   services, one per terminal. Each finishes in-flight work on Ctrl-C. The monitor's status page
   is on `http://127.0.0.1:8090` (loopback only).
+- `go run ./cmd/mailsink`: stand-in for SendGrid's Mail Send API; receives the monitor's alert
+  emails, listed at `http://127.0.0.1:8025/messages`.
 - `go run ./cmd/sendhook`: send a signed fake webhook (`-channel sms`, `-bad-signature`).
 - `go test ./...`: unit tests, no services needed.
 - `go test -tags integration -count=1 ./...`: integration and end-to-end tests. `-count=1`

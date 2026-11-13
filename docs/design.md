@@ -419,7 +419,8 @@ a failure.
   is slow never delays the rules: alerts are queued and sent with retry and backoff on `429`
   and `5xx`.
 - **Status page:** arrivals per second, consumer lag and oldest pending age, model p95, time
-  to insight, alert history, and an **Outbox** of alert emails captured by `cmd/mailsink`.
+  to insight, alert history, and an **Outbox** of alert emails with each one's delivery state
+  (queued, sent, retrying, failed, or dropped because the queue was full).
   Served on `localhost` only; there is no auth, so it is never exposed publicly.
 
 ### 8.2 Mail sink (M3)
@@ -427,8 +428,11 @@ a failure.
 `cmd/mailsink` stands in for SendGrid's Mail Send API, so the alert path can be shown
 end-to-end without an account (SendGrid no longer has a free plan, only a 60-day trial). It
 accepts `POST /v3/mail/send`, checks the bearer token and the request's shape against
-SendGrid's documented contract, returns `202` as SendGrid does, and keeps the messages for the
-status page. A real account is a configuration change: `SENDGRID_BASE_URL` and the API key.
+SendGrid's documented contract, returns `202` as SendGrid does, and keeps the last 100
+messages, listed newest first at `GET /messages` on its loopback address. A real account is a
+configuration change: `SENDGRID_BASE_URL` and the API key. Email alerts are off unless
+`ALERT_EMAIL_TO` is set, and `SENDGRID_BASE_URL` has no default, so a development machine
+never sends through real SendGrid by accident.
 
 ### 8.3 Fault injection and recovery (M3)
 

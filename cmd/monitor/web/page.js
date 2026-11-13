@@ -28,6 +28,10 @@ async function refresh() {
         cell(e.Detail), cell(time(e.At) + " after " + fmtAge(e.DurationSeconds))])),
     ];
     $("alerts").replaceChildren(...(lines.length ? lines : [row([cell("No alerts", "muted")])]));
+
+    const sent = st.Outbox.map(d => row([cell(d.State, d.State === "sent" ? "resolved" : d.State === "retrying" ? "stale" : d.State === "queued" ? "" : "firing"),
+      cell(d.Event + ": " + d.Rule + (d.Subject ? " (" + d.Subject + ")" : "")), cell(String(d.Attempts)), cell(d.LastError || "–"), cell(time(d.Updated))]));
+    $("outbox").replaceChildren(...(sent.length ? sent : [row([cell(st.EmailOn ? "No alert emails yet" : "Email alerts are off (set ALERT_EMAIL_TO)", "muted")])]));
   } catch (err) {
     $("banner").className = "banner bad";
     $("banner").textContent = "The monitor isn't answering: " + err.message;
