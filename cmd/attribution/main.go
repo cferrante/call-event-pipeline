@@ -74,7 +74,7 @@ func run() error {
 	}
 
 	slog.Info("attribution consuming", "config", cfg)
-	handler := consumer.NewHandler(consumer.Attribution.Name, js, attribution.NewStore(db))
+	handler := consumer.NewHandler(consumer.Attribution.Name, js, injectFault(ctx, attribution.NewStore(db)))
 	if err := consumer.Run(ctx, cons, handler, consumer.Attribution.Workers); err != nil {
 		return err
 	}

@@ -54,6 +54,9 @@ func loadConfig() (config, error) {
 	if cfg.rules.CanaryMaxAge, err = duration("CANARY_MAX_AGE", cfg.rules.CanaryMaxAge, false); err != nil {
 		return config{}, err
 	}
+	if cfg.rules.WriteWindow, err = duration("MONITOR_WRITE_WINDOW", cfg.rules.WriteWindow, false); err != nil {
+		return config{}, err
+	}
 	if cfg.email, err = loadEmail(); err != nil {
 		return config{}, err
 	}

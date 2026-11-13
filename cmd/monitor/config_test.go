@@ -9,7 +9,7 @@ func setEnv(t *testing.T, kv map[string]string) {
 	t.Helper()
 	for _, k := range []string{"MONITOR_ADDR", "MONITOR_INTERVAL", "CANARY_INTERVAL", "CANARY_MAX_AGE",
 		"INGEST_URL", "INGEST_PORT", "INGEST_PUBLIC_URL", "TWILIO_AUTH_TOKEN", "DATABASE_URL", "NATS_URL",
-		"ALERT_EMAIL_TO", "ALERT_EMAIL_FROM", "SENDGRID_BASE_URL", "SENDGRID_API_KEY"} {
+		"ALERT_EMAIL_TO", "ALERT_EMAIL_FROM", "SENDGRID_BASE_URL", "SENDGRID_API_KEY", "MONITOR_WRITE_WINDOW"} {
 		t.Setenv(k, "")
 	}
 	for k, v := range kv {
@@ -60,7 +60,8 @@ func TestStatusPageListensOnLoopbackOnly(t *testing.T) {
 }
 
 func TestConfigRejectsBadValues(t *testing.T) {
-	for k, v := range map[string]string{"MONITOR_INTERVAL": "soon", "CANARY_INTERVAL": "-1s", "CANARY_MAX_AGE": "0s"} {
+	for k, v := range map[string]string{"MONITOR_INTERVAL": "soon", "CANARY_INTERVAL": "-1s", "CANARY_MAX_AGE": "0s",
+		"MONITOR_WRITE_WINDOW": "0s"} {
 		env := map[string]string{k: v}
 		for bk, bv := range baseEnv {
 			env[bk] = bv
@@ -114,5 +115,22 @@ func TestAlertEmailConfig(t *testing.T) {
 	setEnv(t, env)
 	if _, err := loadConfig(); err == nil {
 		t.Error("an invalid ALERT_EMAIL_TO accepted")
+	}
+}
+
+// The acked-but-not-written window can be shortened, so a drill or a test doesn't wait a
+// minute for a full window of readings; it defaults to the spec's minute.
+func TestWriteWindowSetting(t *testing.T) {
+	setEnv(t, baseEnv)
+	if cfg, _ := loadConfig(); cfg.rules.WriteWindow != time.Minute {
+		t.Errorf("default write window %v, want 1m", cfg.rules.WriteWindow)
+	}
+	env := map[string]string{"MONITOR_WRITE_WINDOW": "3s"}
+	for k, v := range baseEnv {
+		env[k] = v
+	}
+	setEnv(t, env)
+	if cfg, err := loadConfig(); err != nil || cfg.rules.WriteWindow != 3*time.Second {
+		t.Errorf("write window %v, err %v; want 3s", cfg.rules.WriteWindow, err)
 	}
 }
