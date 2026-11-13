@@ -214,7 +214,12 @@ a webhook spike, letting work wait in the stream instead.
 - **A real model (M3)** sits behind the same interface: a Groq adapter (standard-library HTTP,
   no SDK), with the API key read from SSM at run time. On a hosted model, capacity is a rate
   limit rather than a number of concurrent calls, so a tokens-per-minute limiter runs beside
-  the worker pool, and a `429` that still arrives is retried after `retry-after`. Phone numbers
+  the worker pool, and a `429` that still arrives is retried after `retry-after`. The limiter
+  also keeps a **daily token budget** (`GROQ_TOKENS_PER_DAY`), because the free tier's daily
+  limit is reported in no response header: a run that would exceed it fails fast instead of
+  being refused halfway. The default model is `openai/gpt-oss-20b`, chosen on measured
+  accuracy, latency, token cost and Groq's production status
+  ([benchmarks](benchmarks.md#model-calibration-m3)). Phone numbers
   and email addresses are stripped before any call, and only synthetic texts are ever sent.
   It is used for **calibration**: a low-rate run measures real p50/p95/p99 latency and where
   `429`s begin, and those numbers replace the stub's guessed load-test profile. A small
