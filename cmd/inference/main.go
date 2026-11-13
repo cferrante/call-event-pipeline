@@ -1,4 +1,4 @@
-// Command inference classifies lead events with an AI model (a stub in milestone 2) and stores
+// Command inference classifies lead events with an AI model (a stub, or a hosted model through Groq) and stores
 // the results, never sending the model more work at once than it can serve.
 package main
 
@@ -86,7 +86,11 @@ func run(resetConsumer bool) error {
 	}
 
 	slog.Info("inference consuming", "config", cfg)
-	recorder := inference.NewRecorder(inference.NewStub(cfg.model), inference.NewStore(db))
+	var model inference.Model = inference.NewStub(cfg.model)
+	if cfg.modelKind == "groq" {
+		model = inference.NewGroq(cfg.groq, inference.NewLimiter(cfg.groqPerMinute, cfg.groqPerDay))
+	}
+	recorder := inference.NewRecorder(model, inference.NewStore(db))
 	handler := consumer.NewHandler(consumerCfg.Name, js, recorder)
 	if err := consumer.Run(ctx, cons, handler, consumerCfg.Workers); err != nil {
 		return err

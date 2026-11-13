@@ -1,0 +1,242 @@
+[
+ {
+  "channel": "sms",
+  "intent": "sales",
+  "text": "What's the price for a full kitchen install?"
+ },
+ {
+  "channel": "sms",
+  "intent": "sales",
+  "text": "Can I get a quote for 3 windows? Call me at 415-555-0142"
+ },
+ {
+  "channel": "email",
+  "intent": "sales",
+  "text": "Quote request\n\nHi, we'd like a quote for 40 office chairs delivered next month."
+ },
+ {
+  "channel": "sms",
+  "intent": "sales",
+  "text": "How much does it cost to add a second bathroom?"
+ },
+ {
+  "channel": "email",
+  "intent": "sales",
+  "text": "Buying for our team\n\nWe want to buy the annual plan for 12 people. Who do I talk to?"
+ },
+ {
+  "channel": "sms",
+  "intent": "sales",
+  "text": "I'd like to order now, saw your ad on the bus"
+ },
+ {
+  "channel": "sms",
+  "intent": "sales",
+  "text": "What would it run me to get two of these installed by Friday?"
+ },
+ {
+  "channel": "sms",
+  "intent": "sales",
+  "text": "Do you have any openings next week for an estimate?"
+ },
+ {
+  "channel": "email",
+  "intent": "sales",
+  "text": "Your spring offer\n\nIs the spring offer still on? We're comparing three suppliers and would decide this week."
+ },
+ {
+  "channel": "sms",
+  "intent": "sales",
+  "text": "Interested in the 2-bedroom on Elm St. Is it still available?"
+ },
+ {
+  "channel": "email",
+  "intent": "sales",
+  "text": "Pricing for schools\n\nDo you offer a discount for schools? We have about 300 students. jamie@example.com"
+ },
+ {
+  "channel": "sms",
+  "intent": "sales",
+  "text": "Saw the billboard. Can someone come out and measure the deck?"
+ },
+ {
+  "channel": "email",
+  "intent": "sales",
+  "text": "Demo?\n\nCould we book a demo for Tuesday afternoon? Reply to ops@example.com"
+ },
+ {
+  "channel": "sms",
+  "intent": "sales",
+  "text": "Do you do weekend appointments? Looking to get started asap"
+ },
+ {
+  "channel": "sms",
+  "intent": "sales",
+  "text": "How soon could you start on a roof replacement?"
+ },
+ {
+  "channel": "email",
+  "intent": "sales",
+  "text": "Bulk order\n\nWhat's your minimum for a wholesale account?"
+ },
+ {
+  "channel": "sms",
+  "intent": "support",
+  "text": "My heater is broken again, need help"
+ },
+ {
+  "channel": "email",
+  "intent": "support",
+  "text": "Refund\n\nI was charged twice for order 88213, please refund one of them."
+ },
+ {
+  "channel": "sms",
+  "intent": "support",
+  "text": "I want to cancel my subscription"
+ },
+ {
+  "channel": "email",
+  "intent": "support",
+  "text": "Support needed\n\nThe app won't let me log in since the update."
+ },
+ {
+  "channel": "sms",
+  "intent": "support",
+  "text": "Need help resetting my thermostat, model 3000"
+ },
+ {
+  "channel": "sms",
+  "intent": "support",
+  "text": "The part you shipped is broken, what now?"
+ },
+ {
+  "channel": "sms",
+  "intent": "support",
+  "text": "The unit you installed last week stopped working this morning"
+ },
+ {
+  "channel": "email",
+  "intent": "support",
+  "text": "Where is my order?\n\nIt's been 10 days and tracking hasn't moved. Order 77120."
+ },
+ {
+  "channel": "sms",
+  "intent": "support",
+  "text": "Your tech left a mess in my driveway and didn't finish the job"
+ },
+ {
+  "channel": "email",
+  "intent": "support",
+  "text": "Wrong size\n\nI got the medium instead of the large. How do I swap it?"
+ },
+ {
+  "channel": "sms",
+  "intent": "support",
+  "text": "Water's leaking from the new faucet you put in. Call 415-555-0177"
+ },
+ {
+  "channel": "email",
+  "intent": "support",
+  "text": "Invoice question\n\nMy last invoice shows a fee I don't recognise. Can someone explain it?"
+ },
+ {
+  "channel": "sms",
+  "intent": "support",
+  "text": "The installer never showed up for my appointment today"
+ },
+ {
+  "channel": "sms",
+  "intent": "support",
+  "text": "My account says suspended, I paid on time"
+ },
+ {
+  "channel": "email",
+  "intent": "support",
+  "text": "Password\n\nI can't reset my password, the email never arrives. Account: kim@example.com"
+ },
+ {
+  "channel": "sms",
+  "intent": "support",
+  "text": "Still waiting on the warranty replacement from March"
+ },
+ {
+  "channel": "sms",
+  "intent": "unknown",
+  "text": "Thanks!"
+ },
+ {
+  "channel": "sms",
+  "intent": "unknown",
+  "text": "Who is this?"
+ },
+ {
+  "channel": "sms",
+  "intent": "unknown",
+  "text": "Wrong number sorry"
+ },
+ {
+  "channel": "sms",
+  "intent": "unknown",
+  "text": "STOP"
+ },
+ {
+  "channel": "email",
+  "intent": "unknown",
+  "text": "Newsletter\n\nPlease find attached our monthly industry newsletter."
+ },
+ {
+  "channel": "sms",
+  "intent": "unknown",
+  "text": "ok"
+ },
+ {
+  "channel": "email",
+  "intent": "unknown",
+  "text": "Out of office\n\nI am out of the office until Monday with limited access to email."
+ },
+ {
+  "channel": "sms",
+  "intent": "unknown",
+  "text": "lol you guys are everywhere"
+ },
+ {
+  "channel": "email",
+  "intent": "unknown",
+  "text": "Partnership\n\nWe help companies like yours grow on social media. Want to chat?"
+ },
+ {
+  "channel": "sms",
+  "intent": "unknown",
+  "text": "Is this the pizza place?"
+ },
+ {
+  "channel": "sms",
+  "intent": "unknown",
+  "text": "👍"
+ },
+ {
+  "channel": "email",
+  "intent": "unknown",
+  "text": "Re: your ad\n\n"
+ },
+ {
+  "channel": "sms",
+  "intent": "unknown",
+  "text": "Happy holidays to the whole team"
+ },
+ {
+  "channel": "sms",
+  "intent": "unknown",
+  "text": "Can you help me find a good plumber? You don't do plumbing right?"
+ },
+ {
+  "channel": "email",
+  "intent": "unknown",
+  "text": "Job application\n\nI'd like to apply for the technician role I saw posted. CV attached."
+ },
+ {
+  "channel": "sms",
+  "intent": "unknown",
+  "text": "How do I stop getting these texts?"
+ }
+]

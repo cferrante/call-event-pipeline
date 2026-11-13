@@ -55,6 +55,63 @@ runs gave `607d7f28…`. **Drained after** includes 5 s of confirming the counts
 100/s (seed 3, 7 kills) lost 1 interaction and the run failed. The commit-then-acknowledge order
 is what the passing runs prove.
 
+## Model calibration (M3)
+
+A real hosted model, measured through Groq's free tier from the development machine (8 CPU,
+Ubuntu WSL2, home broadband) on 2026-11-13, with `cmd/calibrate` and only synthetic texts. Run
+it with the key read from SSM into the process's environment, never onto disk or a command line:
+
+```bash
+GROQ_API_KEY=$(aws ssm get-parameter --name /call-event-pipeline/groq-api-key --with-decryption \
+  --query Parameter.Value --output text --profile <PROJECT_PROFILE>) go run ./cmd/calibrate
+```
+
+**Accuracy** on the 48 labelled texts in `cmd/calibrate/labelled.json` (16 per intent, SMS and
+email; labels written before any model ran):
+
+| Classifier | Accuracy | sales | support | unknown | Tokens a call |
+|---|---|---|---|---|---|
+| `openai/gpt-oss-20b`, reasoning effort low | 98% (47/48) | 16/16 | 16/16 | 15/16 | 257 |
+| `qwen/qwen3.8-27b` | 100% (48/48) | 16/16 | 16/16 | 16/16 | 156 |
+| stub keyword rules | 54% (26/48) | 6/16 | 6/16 | 14/16 | – |
+
+`gpt-oss-20b`'s one miss, "How do I stop getting these texts?", is the most debatable label in the
+set (an opt-out, labelled unknown; the model said support). One sample in 48 doesn't separate
+the two models.
+
+**Latency**, 100 calls one at a time at 20 a minute, through the limiter, timed by the client
+(so it includes the home network):
+
+| Model | Errors | 429s | min | p50 | p95 | p99 | max |
+|---|---|---|---|---|---|---|---|
+| `openai/gpt-oss-20b` | 0 | 0 | 107 ms | 309 ms | 519 ms | 825 ms | 849 ms |
+| `qwen/qwen3.8-27b` | 0 | 0 | 149 ms | 273 ms | 594 ms | 895 ms | 1369 ms |
+
+With 100 samples, p99 is the second-slowest call; treat it as indicative.
+
+**Where 429s start** (`gpt-oss-20b`, limiter off, no retries, calls sent on schedule, a minute
+apart between steps so each starts from an empty window):
+
+| Calls a minute | Sent | OK | 429s | Tokens | First 429 after |
+|---|---|---|---|---|---|
+| 20 | 20 | 20 | 0 | 5154 | – |
+| 30 | 30 | 30 | 0 | 7701 | – |
+| 40 | 40 | 35 | 5 | 8959 | 45 s |
+| 50 | 50 | 40 | 10 | 10237 | 36 s |
+
+The limit is tokens, not requests: 8,000 tokens a minute at 257 tokens a call predicts about 31
+calls a minute, and refusals begin between 30 and 40. With the limiter on, the latency run's 100
+calls had no 429s. **So the free tier classifies about 30 leads a minute** (about 50 with Qwen's
+smaller prompts), and 1,000 requests a day; a production deployment would need a paid tier.
+
+**Model choice:** `openai/gpt-oss-20b` stays the default. Groq lists it as a production model;
+`qwen3.8-27b` is a preview model ("may be discontinued at short notice") and, on the paid tier,
+costs about ten times as much per token ($0.80 / $4.00 against $0.075 / $0.30 per million input
+/ output tokens, Groq's models page, 2026-11-13). Qwen's advantage is only the free tier's
+throughput.
+
+The whole calibration spent about 93,000 tokens and cost $0.
+
 ## Notes
 
 ### 2026-10-28, `2f7278d`: M1 baseline

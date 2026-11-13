@@ -260,6 +260,7 @@ deviations below and in [benchmarks](benchmarks.md).
 | 12: crash test | [#21](https://github.com/cferrante/call-event-pipeline/pull/21) | 23 `kill -9`s under 100/s: 24,001 webhooks, none lost or duplicated, identical to the clean run; acking before saving loses data |
 | 13: AWS bootstrap 🧑 | [#22](https://github.com/cferrante/call-event-pipeline/pull/22), [#24](https://github.com/cferrante/call-event-pipeline/pull/24) | Account, sign-in, $10 budget and Groq key exist: `check.sh` went from ✗ (exit 1) to "Bootstrap complete" (exit 0). A 3-hour demo session costs $0.70 at today's prices, so 14 fit in the budget |
 | 14: demo environment | [#25](https://github.com/cferrante/call-event-pipeline/pull/25) | `make demo-up` builds both instances, ships the code and passes an end-to-end smoke test through Systems Manager in under 6 minutes; `demo-down` leaves nothing (46 s). A plan that opens an address range or drops the expiry guard is refused before apply, and the guard really terminates an instance (30 s from firing to `terminated`) |
+| 15: real model | [#27](https://github.com/cferrante/call-event-pipeline/pull/27) | A hosted model classifies the synthetic set at 98% against the stub rules' 54%, at p50 309 ms / p95 519 ms; the limiter keeps it free of 429s, which start between 30 and 40 calls a minute without it. Updating the stub's load-test profile awaits a decision |
 
 ## Deviations from the plan
 
@@ -490,6 +491,32 @@ deviations below and in [benchmarks](benchmarks.md).
 - **Step 14: measured on 2026-11-13.** `demo-up` 349 s (including replacing both instances),
   `demo-down` 46 s. Instance time for the step was about 35 minutes, roughly $0.15
   (estimated from the price list; the bill shows the actual figure a day later).
+
+- **Step 15: the limiter also enforces a daily token budget.** Groq reports requests per day
+  and tokens per minute in its headers, but not tokens per day, and the owner's previous
+  session ran out of daily tokens partway. The limiter now fails fast (`ErrDailyBudget`) when a
+  call would exceed `GROQ_TOKENS_PER_DAY`, tested on a fake clock; `calibrate` takes `-budget`.
+- **Step 15: two models scored, not one.** The small Llama models the plan assumed are gone
+  from Groq; its chat models are now `gpt-oss-120b`, `gpt-oss-20b`, `qwen3.8-27b` and
+  `allam-2-7b`, each with its own limits (1,000 requests a day, 8,000 tokens a minute).
+  `gpt-oss-20b` and `qwen3.8-27b` were both measured; `gpt-oss-20b` stays the default because
+  it is a production model and ten times cheaper on a paid tier, while Qwen is a preview
+  model. `gpt-oss-120b`, which cferrante-dev uses, was left alone so its budget isn't shared.
+- **Step 15: latency was measured from the development machine,** so it includes the home
+  network. Step 16 can repeat the latency run from AWS for comparison.
+- **Step 15: a deliberate break exposed a weak percentile test.** Rounding the nearest rank
+  down instead of up passed, because with 100 samples every rank is a whole number; a
+  10-sample case (p95 is rank 9.5) now catches it.
+- **Step 15: four more deliberate breaks, all caught:** sending text without redaction, a
+  limiter that never waits, a `Settle` that ignores actual usage, and an HTTP client without
+  a timeout. The plan's named break, removing the limiter, is a test case: the fake server
+  answers 429 without it and never with it.
+- **Step 15: checked live through the real service.** With `MODEL=groq`, one signed SMS through
+  ingest became an insight (`sales`, 0.95, `groq/openai/gpt-oss-20b`, 283 ms); the log names
+  the model and never the key.
+- **Step 15: the stub's load-test profile is not yet replaced.** The measured p50 is 309 ms,
+  31 times the load tests' 10 ms; at that latency each spike run's backlog takes over an hour
+  to drain, which would lengthen step 16's AWS session. A decision for the owner.
 
 ## Code-review outcomes
 
