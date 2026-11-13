@@ -527,6 +527,12 @@ Decisions and limitations added in M3:
   linked, and email senders get no `leads` row.
 - **Power loss** can lose JetStream writes since its last disk sync
   ([section 5.5](#55-delivery-guarantees)); the cost of syncing every write is measured.
+- **The demo runs in the default VPC.** Its subnets are public and its network ACL is open, so
+  the security groups alone keep traffic out (no address range is allowed in, enforced before
+  every apply), and each instance has a public IP to reach Systems Manager. That is acceptable
+  for a dedicated account with nothing else in it and instances that live under 3 hours. In
+  production, use a dedicated VPC with private subnets and Systems Manager VPC endpoints (about
+  $0.03/hour for three) or a NAT gateway (about $0.045/hour plus per-GB charges).
 - **The monitor is a single process.** If it dies, nothing alerts. In production it would run
   outside the system it watches, with its own heartbeat to an external service ("who watches
   the watchdog").
