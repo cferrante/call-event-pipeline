@@ -9,3 +9,5 @@ data/
 
 # Spike test output; results worth keeping go in docs/plan-m1.md
 loadtest/results/
+# AWS bootstrap settings: hold email addresses and user names
+/infra/bootstrap/aws/config.env
