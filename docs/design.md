@@ -557,8 +557,11 @@ so it costs nothing between sessions.
 
   *Why a separate load generator:* generating load on the machine being measured takes CPU
   from it and distorts the result.
-- **No inbound ports.** Access is through AWS Systems Manager Session Manager, including
-  port-forwarding the status page to `localhost` for screen sharing.
+- **No inbound ports from any address.** The only ingress rule lets the load generator's
+  security group reach ingest's port. Access is through AWS Systems Manager (Run Command for
+  scripts, Session Manager for a shell and for port-forwarding the status page to
+  `localhost`). `make demo-up` refuses any plan that allows an address range in
+  ([infra/demo](../infra/demo/README.md)).
 - **Build and deploy:** binaries are cross-compiled locally for `linux/arm64` and shipped
   through a short-lived S3 bucket, so the private repository is never cloned onto the server.
 - **Commands:** `make demo-up`, `demo-spike`, `demo-crash`, `demo-fault`, `demo-down`, with a

@@ -50,6 +50,10 @@ jobs:
         # Offline: a fake AWS CLI stands in, so nothing reaches AWS.
         run: ./infra/bootstrap/aws/check_test.sh
 
+      - name: Demo environment script tests
+        # Offline, as above. The plan check's own tests run with the unit tests.
+        run: ./infra/demo/check_test.sh
+
       - name: Install nats-server
         run: |
           file="nats-server-${NATS_SERVER_VERSION}-linux-amd64"

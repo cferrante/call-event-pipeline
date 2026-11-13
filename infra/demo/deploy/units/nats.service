@@ -1,0 +1,14 @@
+[Unit]
+Description=NATS server with JetStream
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+User=cep
+# Clients and the monitoring port listen on loopback only.
+ExecStart=/opt/cep/bin/nats-server -a 127.0.0.1 -js -sd /var/lib/cep/nats -m 8222
+Restart=on-failure
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target
