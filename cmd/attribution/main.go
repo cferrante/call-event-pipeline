@@ -1,13 +1,20 @@
 // Command attribution consumes lead events from JetStream and records them in Postgres.
+//
+// With -replay-from it instead re-records every event published since that time, writing
+// only what is missing, and exits (docs/design.md, section 5.3): the recovery after a fault
+// that acknowledged events without writing them. The durable consumer is not touched, so the
+// service can keep running during a replay.
 package main
 
 import (
 	"context"
+	"flag"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/nats-io/nats.go"
@@ -28,9 +35,17 @@ func main() {
 }
 
 func run() error {
+	replayFrom := flag.String("replay-from", "", "re-record events published since this RFC 3339 time, then exit")
+	flag.Parse()
 	cfg, err := loadConfig()
 	if err != nil {
 		return err
+	}
+	var from time.Time
+	if *replayFrom != "" {
+		if from, err = parseReplayFrom(*replayFrom); err != nil {
+			return err
+		}
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
@@ -66,6 +81,12 @@ func run() error {
 		return err
 	}
 	if err := stream.EnsureStream(ctx, js); err != nil {
+		return err
+	}
+	if !from.IsZero() {
+		res, err := consumer.Replay(ctx, js, attribution.NewStore(db), from)
+		slog.Info("replay finished", "read", res.Read, "recorded", res.Recorded,
+			"already_recorded", res.AlreadyRecorded, "unparseable", res.Unparseable)
 		return err
 	}
 	cons, err := consumer.EnsureConsumer(ctx, js, consumer.Attribution)
