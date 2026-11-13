@@ -389,6 +389,25 @@ real inbox moment is wanted in the demo; about $0.10 per 1,000 emails, checked f
   doesn't depend on processing order. The new e2e tests ran 48 times without failure with 8
   parallel runs on 2 cores, the contention that exposed the earlier flake.
 
+- **Step 12: the expected data is computed, not taken from a clean run.** Every webhook is a
+  pure function of its sequence number, so the script computes in SQL exactly what the
+  database must hold, an oracle independent of the pipeline. The clean run (`KILLS=0`) is
+  kept and must match the same checksum, which proves the oracle matches reality: both 240 s
+  runs gave `607d7f28…`.
+- **Step 12: the checksum leaves out each lead's first and last touch.** They depend on the
+  order calls arrive in, and a provider's retries during an outage legitimately reorder them;
+  each interaction's linked lead is still checked.
+- **Step 12: two script defects found by the deliberate break, fixed before the full runs.**
+  The ack-before-commit run lost 1 interaction and failed as it should, but its "zero
+  duplicates" check also failed because of the loss, a misleading label: it now checks for
+  rows outside the expected set (proven by breaking the expected IDs, which fails both
+  checks). And the drain wait ran its full 300 s, because the row count never reached the
+  target; it now ends when both consumers are empty and the counts hold for 5 s.
+- **Step 12: no sender retries in a short run that killed only NATS and the consumers.** The
+  NATS client buffers a publish while it reconnects and the acknowledgement arrives after the
+  restart, within ingest's timeout, so the sender never sees a failure. Killing ingest does
+  cause retries (170 in the full run).
+
 ## Code-review outcomes
 
 None yet.

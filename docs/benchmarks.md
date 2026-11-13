@@ -38,6 +38,23 @@ Rows come from the same runs as the table above (`run.sh` prints both). **Mode**
 10 ms latency, 200 ms timeout, capacity 4 (see the [M2 plan](plan-m2.md#deviations-from-the-plan)).
 Model latency should stay flat in `normal`; time to insight rises during the spike by design.
 
+## Crash test (M3)
+
+| Date | Commit | Machine | Run | Kills | Webhooks | Sender retries | Drained after | Data | Dead letters |
+|---|---|---|---|---|---|---|---|---|---|
+| 2026-11-13 | `3d15a5c`+crash scripts | 8 CPU, Ubuntu WSL2 | crash, 100/s for 240s, seed 1 | 23 | 24001 | 170 | 6s | ✓ 24001 | 0 |
+| 2026-11-13 | `3d15a5c`+crash scripts | 8 CPU, Ubuntu WSL2 | clean, 100/s for 240s, seed 1 | 0 | 24001 | 0 | 5s | ✓ 24001 | 0 |
+
+Run with `./loadtest/crash.sh` (`KILLS=0` for the clean run). **Kills** are `kill -9` of a random
+service every 5–15 s; this run killed attribution 8 times, inference and `nats-server` 6 each,
+and ingest 3. **Data** is ✓ when every interaction, insight and lead matches what the webhooks
+say must exist, computed in SQL from the iteration numbers, with an identical checksum; both
+runs gave `607d7f28…`. **Drained after** includes 5 s of confirming the counts hold.
+
+**Deliberate break:** with attribution acknowledging *before* committing, a 60-second run at
+100/s (seed 3, 7 kills) lost 1 interaction and the run failed. The commit-then-acknowledge order
+is what the passing runs prove.
+
 ## Notes
 
 ### 2026-10-28, `2f7278d`: M1 baseline

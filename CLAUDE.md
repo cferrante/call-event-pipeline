@@ -81,6 +81,8 @@ no Docker. Load the environment first in every terminal: `set -a; source .env; s
   loaded they are skipped yet reported as `ok`; use `-v` to see `SKIP`.
 - `./loadtest/run.sh`: spike test, isolated from development data. `MODE=control` runs it
   without the inference limit, as the comparison.
+- `./loadtest/crash.sh`: crash test, `kill -9` of random services under load with a restart
+  loop; checks the data is exactly what the webhooks imply. `KILLS=0` is the clean run.
 - `gofmt -l .` and `go vet ./...` before every commit.
 
 ## Architecture
