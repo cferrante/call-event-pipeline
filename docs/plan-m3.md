@@ -355,6 +355,14 @@ real inbox moment is wanted in the demo; about $0.10 per 1,000 emails, checked f
   the failure and the two still arrived in order. The test now fails the *firing* event's first
   attempt, and parallel delivery fails it.
 
+- **Found in step 10's CI run: e2e tests could seed a table before its migration ran.** The
+  helper that starts attribution waited only for the `interactions` table (migration 0001),
+  but each migration commits on its own, so the email test could insert into
+  `tracking_addresses` (0006) before it existed. Locally the gap between the two is too short
+  to hit; on a loaded CI runner it opened. Reproduced with 8 parallel runs on 2 cores (27
+  failures in 120); the helper now waits until `schema_migrations` lists every embedded
+  migration: 0 failures in 120 under the same contention.
+
 ## Code-review outcomes
 
 None yet.
