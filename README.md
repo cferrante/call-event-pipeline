@@ -32,6 +32,9 @@ decisions, and the [M1](docs/plan-m1.md) and [M2](docs/plan-m2.md) plans for how
 - **M1:** ingest edge, attribution consumer, dead-letter handling, spike test proving zero
   loss and zero duplicates
 - **M2:** AI inference consumer with backpressure, so inference latency stays flat under load
+- **M3 (in progress):** email channel, schema contract, silent-failure monitor with alert
+  email, replay recovery, and a crash test; server benchmarks on AWS next. What each step
+  proved is in the [M3 plan's progress table](docs/plan-m3.md#progress)
 
 ## Running locally
 

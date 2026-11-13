@@ -1,7 +1,8 @@
 # Concepts guide
 
 New to NATS, JetStream or event-driven systems? Read [Life of a lead](#life-of-a-lead) first,
-then [Life of an insight](#life-of-an-insight) for the AI side, and use the
+then [Life of an insight](#life-of-an-insight) for the AI side and
+[Life of an incident](#life-of-an-incident) for what happens when something breaks, and use the
 [glossary](#glossary) to look things up. The [design spec](design.md) explains
 *why* the system is built this way; this page explains the words it uses.
 
@@ -95,6 +96,39 @@ that fail again, and the backlog takes *longer* to drain despite 50 times the wo
 [congestion collapse](#congestion-collapse). Measured results are in
 [benchmarks](benchmarks.md).
 
+## Life of an incident
+
+What happens when part of the pipeline breaks without crashing (milestone 3). This is the drill
+in the README, played out step by step.
+
+**1. A silent failure.** Attribution keeps running, passes its health check and keeps up with
+the stream, but a bug means it [acks](#ack) messages without writing them. Nothing errors,
+[consumer lag](#consumer-lag) stays at zero, and leads quietly go missing: a
+[silent failure](#silent-failure). In drills this bug is switched on deliberately with
+[fault injection](#fault-injection).
+
+**2. Detection.** The monitor reads the pipeline every 5 seconds from outside. Its
+*acked but not written* rule compares how far attribution has acked with how many rows it wrote
+over the last minute; when rows fall below 90% of acks, the alert starts
+[firing](#alert-firing-and-resolved). The [canary](#canary) is a second line of defence: its own
+test webhook stops showing up in the database, so *arrivals stopped* fires 30 seconds later.
+
+**3. Alerting.** The alert is logged, shown on the status page, and emailed once (not every 5
+seconds). Email goes through a queue, so if the mail service is slow or
+[rate-limited](#rate-limit-429) the monitor keeps checking, and the queue
+[retries with backoff](#retry-with-backoff-and-jitter).
+
+**4. Fix the cause.** Someone fixes the bug and restarts attribution, or, in a drill, switches
+the fault off. New messages are written again and the alert resolves, but the rows lost during
+the incident are still missing.
+
+**5. Replay.** Every event is still in the stream (it keeps 7 days), so the fix for the lost
+rows is a [replay](#replay): read the incident's period again and record whatever is missing.
+Writes are [idempotent](#idempotency), so rows that were written are left alone.
+
+**6. Proof.** The drill's test compares the database with a clean run of the same events using
+a checksum: after replay they match exactly, and a second replay changes nothing.
+
 ## Glossary
 
 Each entry: what it means, then how this project uses it.
@@ -127,6 +161,14 @@ turns.
 *In this project:* the migrator holds one so two services starting at once don't apply the
 same migration twice.
 
+### Alert (firing and resolved)
+
+An alert has two moments: when it starts (*firing*) and when its condition clears (*resolved*).
+Notifying on those two changes, not on every check, means one email per incident instead of one
+every few seconds.
+*In this project:* `internal/monitor`'s tracker turns each 5-second evaluation into firing and
+resolved events; the email and the status page use them.
+
 ### Arrival rate
 
 A way of generating load: start a fixed number of requests per second, whether or not earlier
@@ -147,6 +189,16 @@ so any processing slower than that value is redelivered while still running.
 *In this project:* deliberately not used; retry delays come from [NakWithDelay](#nak) instead.
 See [design section 5.2](design.md#52-jetstream-configuration).
 
+### Build tag
+
+A label in a Go file's first line (`//go:build faultinject`) that leaves the file out of the
+build unless the tag is asked for (`go build -tags faultinject`).
+*Gotcha:* ordinary `go build`, `go test` and `go vet` never compile a tagged file, so it can
+stop compiling unnoticed when code it uses changes ("rot"). CI therefore also vets the tagged
+build.
+*In this project:* the [fault injection](#fault-injection) code exists only in `faultinject`
+builds, and a test checks that a normal binary doesn't contain it.
+
 ### Bulkhead
 
 Splitting a system into compartments so a failure or overload in one can't sink the others,
@@ -155,6 +207,14 @@ named after the watertight sections of a ship's hull.
 progress, so a slow model can't hold back attribution. They still share Postgres and the CPU,
 which is why attribution drains more slowly under load with inference running (see
 [benchmarks](benchmarks.md)).
+
+### Canary
+
+A small, harmless piece of fake traffic sent all the time, so that if it stops arriving
+somewhere is broken. Named after the canaries miners took underground as an early warning.
+*In this project:* the monitor sends a signed voice webhook every 10 seconds from `canary` and
+checks its row reaches Postgres; if none arrives for 30 seconds, *arrivals stopped* fires.
+Reports leave canary rows out.
 
 ### Capacity
 
@@ -224,6 +284,15 @@ Where messages go when the system has given up processing them, together with th
 person can fix the cause and replay or discard them. Often shortened to **DLQ**.
 *In this project:* stream `LEADS_DLQ`, subject `leads.dlq`, kept 30 days. Each dead letter has
 the original bytes plus `Dlq-Reason` and `Dlq-Subject` headers. A healthy DLQ is empty.
+
+### Deliberate break
+
+Breaking the code on purpose to check a test catches it. A test that passes on its first run
+might be testing nothing, and this is how to find out. Doing it systematically with tools is
+called *mutation testing*.
+*In this project:* every step does it, and it has found tests that couldn't fail: an ordering
+test that passed with ordering broken, and a symbol check that looked for the wrong name
+([M3 plan](plan-m3.md#deviations-from-the-plan)).
 
 ### Deliver policy
 
@@ -304,6 +373,13 @@ time and all original parameters.
 How [k6](#k6) schedules work in a scenario: for example, a fixed number of
 [virtual users](#virtual-user), or a target [arrival rate](#arrival-rate).
 
+### Fault injection
+
+Causing a failure on purpose, in a controlled way, to check the system detects it and recovers.
+Practising this is a *drill*.
+*In this project:* in a `faultinject` [build](#build-tag), `SIGUSR1` makes attribution ack
+without writing; see [Life of an incident](#life-of-an-incident).
+
 ### Fetch
 
 A [pull consumer](#pull-consumer) asking JetStream for the next batch of messages.
@@ -337,6 +413,15 @@ The persistence layer built into the NATS server. It adds [streams](#stream) (st
 A free, open-source load-testing tool. Test scripts are written in JavaScript; k6 itself is a
 single Go binary.
 *In this project:* `loadtest/spike.js`, run by `loadtest/run.sh`.
+
+### kill -9
+
+Sends `SIGKILL`, which ends a process at once: no cleanup and no chance to finish in-flight
+work. Ctrl-C (`SIGINT`) or `SIGTERM` instead asks the process to stop, which is a
+[graceful shutdown](#drain). A crash or power cut behaves like `kill -9`, so it is the honest
+test of "nothing is lost".
+*In this project:* `loadtest/crash.sh` kills a random service with `kill -9` every 5–15
+seconds under load, and checks the data is exactly right afterwards.
 
 ### MaxAckPending
 
@@ -427,9 +512,47 @@ A [consumer](#consumer) whose workers ask for messages when they have capacity, 
 having JetStream push messages at them. Pull is the natural fit for backpressure: a busy worker
 simply asks less often.
 
+### Rate limit (429)
+
+A service's limit on how many requests a client may make; over it, the answer is HTTP `429 Too
+Many Requests`, often with a header saying when to try again.
+*In this project:* SendGrid's Mail Send API sends `X-RateLimit-Reset`; the alert queue waits
+until then before retrying.
+
 ### Redelivery
 
 JetStream sending a message again, after a [nak](#nak) or when [AckWait](#ackwait) expires.
+
+### Replay
+
+Reading a stream's stored messages again from a past point in time.
+*In this project:* `attribution -replay-from <time>` reads from that time to the stream's newest
+message through a temporary consumer, records what's missing, then deletes the consumer. The
+[durable consumer](#durable-consumer) doesn't move, so the service keeps running.
+
+### Retry with backoff and jitter
+
+Trying a failed request again after waiting, with the wait growing each time (*backoff*:
+0.25 s, 0.5 s, 1 s …) and a random variation (*jitter*) so many clients don't all retry at the
+same instant and overload the service again. Only worth doing when the failure may pass: a
+`429` or `5xx`, not a `400`.
+*In this project:* the alert queue (1 s doubling to 60 s), the crash test's k6 sender, and
+replay's writes. Compare JetStream's [BackOff](#backoff) setting, which is a different thing.
+
+### Schema contract
+
+A published, versioned description of an event's shape that producers and consumers agree on,
+with tests on both sides, so a breaking change fails a test instead of production.
+*In this project:* JSON Schema files and examples in `schemas/lead-event/`; the producer test
+checks every [envelope](#envelope) validates, and each consumer must process every published
+example. See [design section 6.1](design.md#61-the-schema-as-a-contract-m3).
+
+### Silent failure
+
+A failure that raises no error: the process stays up and looks healthy while its work is
+wrong or missing. More dangerous than a crash, because nothing notices.
+*In this project:* the monitor watches results (rows written, canary arrivals), not just
+whether processes run; see [Life of an incident](#life-of-an-incident).
 
 ### Spike test
 
@@ -455,6 +578,13 @@ end (`leads.>`).
 success. The message stays in the stream.
 *In this project:* used right after a message is copied to the
 [dead-letter queue](#dead-letter-queue).
+
+### Test oracle
+
+The source of truth a test compares results against. It should be independent of the code
+being tested, or the test only checks the code agrees with itself.
+*In this project:* the crash test builds every webhook from its sequence number, so it can
+compute in SQL exactly what the database must hold, and compare.
 
 ### Throughput
 

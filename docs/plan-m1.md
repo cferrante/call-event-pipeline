@@ -139,6 +139,25 @@ and you can start and stop NATS and Postgres yourself.
 - Run `/code-review` on the M1 branch, fix or explicitly decline each finding, and record the
   outcomes below.
 
+## Progress
+
+What each step proved. All of M1 merged as one PR, [#2](https://github.com/cferrante/call-event-pipeline/pull/2).
+
+| Step | What it proves |
+|---|---|
+| 0–1: toolchain, module | Everything installs natively, free, in about 0.5 GB |
+| 2: Twilio signatures | Twilio's published example verifies; tampering, a wrong token or a missing header is rejected, in constant time |
+| 3: event envelope | Voice and SMS webhooks become one event shape that keeps every original parameter |
+| 4: ingest handler | Bad signature → 403, oversize → 413, publish failure → 503; only a stored event gets a 200 |
+| 5: JetStream publisher | Publish returns only after the stream confirms; the same message ID twice is stored once |
+| 6: schema | Migrations apply cleanly and re-running them is a no-op |
+| 7: attribution store | Correct campaign, `unknown` for unknown numbers, one row per call even when repeated, first/last touch right even out of order |
+| 8–9: consumer, dead letters | Bad messages are dead-lettered at once; transient failures retry; messages that exhaust retries are dead-lettered |
+| 10: runnable services | Each service starts from env vars and finishes in-flight work on Ctrl-C |
+| 11: spike test | 1,000 webhooks/s became lag, not errors: 67,499 accepted, 67,499 rows, edge p99 1.03 ms ([results](#results)) |
+| 12: conversation report | Messages group into conversations by a 24-hour gap |
+| 13: code review | Findings fixed or declined, recorded below |
+
 ## Deviations from the plan
 
 - **Step 1: directories are created when a step first needs them**, not all up front. Git

@@ -140,6 +140,21 @@ dual write and transactional outbox were added with this plan.)
 
 `/code-review` on the M2 branch; fix or decline each finding and record outcomes below.
 
+## Progress
+
+What each step proved. All of M2 merged as one PR, [#4](https://github.com/cferrante/call-event-pipeline/pull/4).
+
+| Step | What it proves |
+|---|---|
+| 1: spec | The inference design (D1–D5) and its targets are written down before code |
+| 2: stub model | A fake model behaves like a real one: flat latency within capacity, slower beyond it, timeouts when overloaded |
+| 3: insights store | One insight per interaction, even with redeliveries or concurrent duplicates |
+| 4: worker pool | Never more than N messages in progress; JetStream enforces the same cap; attribution unchanged |
+| 5: inference service | A webhook produces an interaction and an insight; stopping inference doesn't slow ingest or attribution |
+| 6: spike test | Model latency stayed flat (11 ms p95) through 1,000/s while the backlog waited in the stream; without the limit, the model collapsed ([results](#results)) |
+| 7: concepts | The guide explains the inference terms |
+| 8: code review | Findings fixed or declined, recorded below |
+
 ## Deviations from the plan
 
 - **Step 4: dead-letter IDs now include the consumer's name.** A dead letter's de-duplication
