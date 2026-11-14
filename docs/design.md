@@ -109,7 +109,10 @@ demos, alert emails go to `cmd/mailsink`, a stand-in for SendGrid's Mail Send AP
     **streamed**: attachment parts are read and discarded without being buffered, while every
     byte still feeds the signature hash. Text fields are capped (64 KB each) and the envelope
     records only the attachment count, which keeps the stream small and attachment content
-    (often PII) out of it.
+    (often PII) out of it. The event keeps one value per field within a 96 KB total (subject
+    998 bytes, other small fields 4 KB each, then text, then headers), so even with JSON's
+    6-byte escapes it stays well inside NATS's 1 MB message limit; a larger event could never
+    be published, and SendGrid would retry it until the lead was lost.
   - **Signature:** SendGrid's security policy signs with ECDSA (P-256) over SHA-256 of the
     `X-Twilio-Email-Event-Webhook-Timestamp` header's bytes followed by the raw body, and sends
     the base64 ASN.1 signature in `X-Twilio-Email-Event-Webhook-Signature`. The public key
