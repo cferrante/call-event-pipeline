@@ -221,6 +221,9 @@ a webhook spike, letting work wait in the stream instead.
   accuracy, latency, token cost and Groq's production status
   ([benchmarks](benchmarks.md#model-calibration-m3)). Phone numbers
   and email addresses are stripped before any call, and only synthetic texts are ever sent.
+  An interaction with no text (a call, or the monitor's canary) is stored as `unknown` with
+  model version `no-text` without a call, and only the first 8,000 bytes of a long message are
+  sent, less if needed so one call always fits the budget a minute.
   It is used for **calibration**: a low-rate run measures real p50/p95/p99 latency and where
   `429`s begin, and those numbers replace the stub's guessed load-test profile. A small
   labelled set gives a measured accuracy for both the real model and the stub's rules.
