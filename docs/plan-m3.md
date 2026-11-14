@@ -298,6 +298,8 @@ deviations below and in [benchmarks](benchmarks.md).
 | 15: real model | [#27](https://github.com/cferrante/call-event-pipeline/pull/27) | A hosted model classifies the synthetic set at 98% against the stub rules' 54%, at p50 309 ms / p95 519 ms; the limiter keeps it free of 429s, which start between 30 and 40 calls a minute without it. The stub's default now reproduces the measured p50 and p95 within 5% ([#28](https://github.com/cferrante/call-event-pipeline/pull/28)) |
 | demo path (before 16) | [#29](https://github.com/cferrante/call-event-pipeline/pull/29) | On AWS, `make demo-spike` sent 1,000 webhooks/s: 37,799 accepted, stored and classified exactly once, edge p99 0.96 ms, drained in 69 s, no false alerts. Stopping attribution fails the run, fires and then resolves *arrivals stopped* by email, and loses nothing. `make demo-status` shows the status page and alert inbox through Session Manager |
 | 16: server benchmarks | [#30](https://github.com/cferrante/call-event-pipeline/pull/30), [#31](https://github.com/cferrante/call-event-pipeline/pull/31), #32 | On AWS: three 1,000/s spikes with no loss and flat model latency (edge p99 ≤ 1.05 ms, runs within 5%); control overloads the model 17×; the edge sustains at least 4,000/s; attribution drains ~620/s, limited by one transaction per message; our code is under 1% of either service's CPU; 23 kills leave the data identical; a silent failure is alerted in 5 s and fully replayed; `sync_interval: always` caps the edge at 300–500/s. $0.28 |
+| (fix) | [#33](https://github.com/cferrante/call-event-pipeline/pull/33) | `acked_not_written` no longer fires under heavy retries: the monitor counts acknowledgements without the ack floor; a repeated control run on AWS raised only the correct `stale_backlog` |
+| 17: postmortem | #34 | A silent write failure on the server was detected in 6.5 s and all 621 lost calls replayed; the write-up names a misleading second alert and "resolved isn't recovered" as follow-ups |
 
 ## Deviations from the plan
 
@@ -630,6 +632,12 @@ deviations below and in [benchmarks](benchmarks.md).
   without subtracting the messages awaiting an ack it reports 5, and the test fails. The
   step 10 drill's end-to-end test still detects the fault. Confirmed on AWS with the step 17
   session's control run.
+- **Step 17: the incident ran in its own short session** (15 minutes, about $0.06), because
+  step 16's instance logs were gone. It first repeated the control run on the fixed monitor:
+  no `acked_not_written`, only the correct `stale_backlog`. The drill then passed all five
+  checks (detected in 6.5 s, 621 lost, all replayed), and its journal and alert emails are the
+  postmortem's timeline. The journal showed a second alert the drill script doesn't check,
+  `arrivals_stopped`, because the canaries were lost too; the postmortem records it.
 
 ## Code-review outcomes
 
