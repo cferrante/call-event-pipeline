@@ -19,6 +19,7 @@ const (
 	RuleVolumeDrop      = "volume_drop"
 	RuleAckedNotWritten = "acked_not_written"
 	RuleStaleBacklog    = "stale_backlog"
+	RuleReadingsFailing = "readings_failing"
 )
 
 // Sample is one reading of the pipeline.
@@ -53,6 +54,8 @@ type Config struct {
 	MinAcked        uint64
 	// Stale backlog: a consumer's oldest pending message is older than this.
 	StaleAfter time.Duration
+	// Readings failing: the monitor itself has failed to read the pipeline for this long.
+	ReadingsFailAfter time.Duration
 }
 
 // DefaultConfig is the spec's thresholds.
@@ -60,7 +63,7 @@ var DefaultConfig = Config{
 	CanaryMaxAge: 30 * time.Second,
 	Recent:       5 * time.Minute, Baseline: time.Hour, DropRatio: 0.2, MinRate: 1,
 	WriteWindow: time.Minute, MinWrittenRatio: 0.9, MinAcked: 100,
-	StaleAfter: 5 * time.Minute,
+	StaleAfter: 5 * time.Minute, ReadingsFailAfter: 30 * time.Second,
 }
 
 // Finding is a rule that is firing now.

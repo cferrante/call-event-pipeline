@@ -423,6 +423,7 @@ a failure.
 | **Volume drop** | A partial outage upstream | The last 5 minutes' arrival rate is below 20% of normal, where normal is the **median** of the per-minute rates over the hour before, and is at least 1/s. The median, not the mean: a sustained burst lifts an hour's mean several-fold, so ordinary traffic afterwards would look like an outage |
 | **Acked but not written** | A consumer that stays up and acknowledges messages without writing them | Over 60 s, rows written are below 90% of messages the consumer acknowledged (from its ack floor), with at least 100 acknowledged |
 | **Stale backlog** | A consumer falling too far behind | The oldest pending message is more than 5 minutes old |
+| **Readings failing** | The monitor itself can't see the pipeline (Postgres or NATS down) | Every reading for 30 s has failed. Alerts already firing stay as they are until a reading succeeds; a failed reading is never treated as a reading of zero |
 
 - **Alerts** have firing and resolved states, are logged as structured events, and appear on
   the status page. They go through an `Alerter` interface with three implementations: log

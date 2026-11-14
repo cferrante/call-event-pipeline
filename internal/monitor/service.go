@@ -2,6 +2,7 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"slices"
 	"sync"
@@ -44,6 +45,8 @@ type Service struct {
 	history []Sample
 	tracker Tracker
 	status  Status
+	// failingSince is when readings started failing; zero while they succeed.
+	failingSince time.Time
 }
 
 // NewService returns a monitor that calls alert for every alert that starts or ends.
@@ -52,7 +55,9 @@ func NewService(src Source, cfg Config, alert func(Event)) *Service {
 }
 
 // Tick takes one reading at now. A failed reading is reported and skipped: treating it as a
-// reading of zero would look like an outage.
+// reading of zero would look like an outage. Readings that keep failing for ReadingsFailAfter
+// raise readings_failing, so a monitor that can't see the pipeline isn't silent through an
+// outage; alerts already firing stay as they are until a reading succeeds.
 func (s *Service) Tick(ctx context.Context, now time.Time) {
 	sample, err := s.src.Sample(ctx, now)
 	s.mu.Lock()
@@ -60,13 +65,32 @@ func (s *Service) Tick(ctx context.Context, now time.Time) {
 	if err != nil {
 		slog.Error("monitor reading failed", "err", err)
 		s.status.SampleError = err.Error()
+		if s.failingSince.IsZero() {
+			s.failingSince = now
+		}
+		if age := now.Sub(s.failingSince); age >= s.cfg.ReadingsFailAfter {
+			findings := []Finding{{Rule: RuleReadingsFailing,
+				Detail: fmt.Sprintf("no reading for %v: %v", age.Round(time.Second), err)}}
+			for _, a := range s.tracker.Active() {
+				if a.Rule != RuleReadingsFailing {
+					findings = append(findings, a.Finding)
+				}
+			}
+			s.report(now, findings)
+		}
 		return
 	}
+	s.failingSince = time.Time{}
 	s.status.SampleError = ""
 	s.history = append(s.history, sample)
 	s.trim(now)
+	s.report(now, Evaluate(s.cfg, s.history))
+	s.updateRates(sample)
+}
 
-	for _, e := range s.tracker.Update(now, Evaluate(s.cfg, s.history)) {
+// report records findings at now, sends each alert that starts or ends, and updates the page.
+func (s *Service) report(now time.Time, findings []Finding) {
+	for _, e := range s.tracker.Update(now, findings) {
 		s.alert(e)
 		s.status.Recent = slices.Insert(s.status.Recent, 0, e)
 		if len(s.status.Recent) > recentEvents {
@@ -74,7 +98,6 @@ func (s *Service) Tick(ctx context.Context, now time.Time) {
 		}
 	}
 	s.status.Active = s.tracker.Active()
-	s.updateRates(sample)
 }
 
 // trim keeps only the history the rules look at: the volume rule's baseline plus its recent
