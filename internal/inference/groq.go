@@ -47,6 +47,9 @@ func (g *Groq) TokensUsed() int64 { return g.tokensUsed.Load() }
 // RateLimited counts the 429s Groq has answered, retried or not.
 func (g *Groq) RateLimited() int64 { return g.rateLimited.Load() }
 
+// NoTextVersion is the model version stored for an interaction with no text to classify.
+const NoTextVersion = "no-text"
+
 const groqSystemPrompt = `You classify messages that people send to a business after seeing its marketing.
 Answer with JSON only: {"intent": "sales" | "support" | "unknown", "score": <confidence from 0 to 1>}.
 sales: wants to buy or book, or asks about prices, quotes, availability or options.
@@ -65,7 +68,12 @@ type groqResponse struct {
 }
 
 func (g *Groq) Classify(ctx context.Context, in Input) (Result, error) {
-	user := fmt.Sprintf("Channel: %s\nMessage:\n%s", in.Channel, Redact(in.Body))
+	text := strings.TrimSpace(in.Body)
+	if text == "" {
+		// A call (no text yet) or the monitor's canary: nothing to classify, so no tokens spent.
+		return Result{Intent: "unknown", Score: 1, ModelVersion: NoTextVersion}, nil
+	}
+	user := fmt.Sprintf("Channel: %s\nMessage:\n%s", in.Channel, Redact(text))
 	req := map[string]any{
 		"model": g.cfg.Model,
 		"messages": []map[string]string{

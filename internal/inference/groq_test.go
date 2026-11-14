@@ -271,3 +271,24 @@ func TestGroqLimiterPreventsRateLimits(t *testing.T) {
 		}
 	}
 }
+
+// A call has no text yet, and neither has the monitor's canary, sent every 10 s. Asking the
+// model about nothing would spend the daily token budget on them (8,640 canaries a day at a
+// few hundred tokens each is several times GROQ_TOKENS_PER_DAY), so it isn't asked.
+func TestGroqSkipsTheModelWithoutText(t *testing.T) {
+	f := &fakeGroq{t: t, clock: newVirtualClock(), tokensPerCall: 200}
+	lim := NewLimiter(7200, 100_000)
+	g := newTestGroq(t, f, lim)
+	for _, body := range []string{"", " \n\t "} {
+		got, err := g.Classify(context.Background(), Input{Channel: envelope.Voice, Body: body})
+		if err != nil {
+			t.Fatalf("body %q: %v", body, err)
+		}
+		if got != (Result{Intent: "unknown", Score: 1, ModelVersion: NoTextVersion}) {
+			t.Errorf("body %q: %+v, want unknown from %s", body, got, NoTextVersion)
+		}
+	}
+	if len(f.requests) != 0 || lim.UsedToday() != 0 {
+		t.Errorf("%d requests sent and %d tokens charged for messages with no text", len(f.requests), lim.UsedToday())
+	}
+}
