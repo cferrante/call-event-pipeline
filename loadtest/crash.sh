@@ -18,7 +18,9 @@ set -a; source .env; set +a
 
 RATE=${RATE:-100} DURATION=${DURATION:-240s} SEED=${SEED:-1} MIN_KILLS=${MIN_KILLS:-20}
 KILLS=${KILLS:-on} DRAIN_TIMEOUT=${DRAIN_TIMEOUT:-300}
-MODEL_LATENCY=${MODEL_LATENCY:-10ms} MODEL_TIMEOUT=${MODEL_TIMEOUT:-200ms} MODEL_CAPACITY=${MODEL_CAPACITY:-4}
+# The model runs 31 times faster than the calibrated real one (309 ms), so a spike drains in
+# minutes; what the test proves (flat model latency, no loss) does not depend on the scale.
+MODEL_LATENCY=${MODEL_LATENCY:-10ms} MODEL_TIMEOUT=${MODEL_TIMEOUT:-200ms} MODEL_CAPACITY=${MODEL_CAPACITY:-4} MODEL_JITTER=${MODEL_JITTER:-0.1}
 NATS_PORT=4323 MON_PORT=8323 INGEST_PORT=8092
 DB_NAME=leads_crash
 DB_URL="${DATABASE_URL%/*}/${DB_NAME}"
@@ -103,7 +105,7 @@ sql "INSERT INTO tracking_numbers (phone_e164, campaign_id, source) VALUES
        ('+18005550002', 'morning-show', 'radio'),
        ('+18005550003', 'spring-flyer', 'print')" >/dev/null
 supervise inference env DATABASE_URL="$DB_URL" NATS_URL="$NATS_URL_CT" INFERENCE_WORKERS=$MODEL_CAPACITY \
-  MODEL_CAPACITY=$MODEL_CAPACITY MODEL_LATENCY=$MODEL_LATENCY MODEL_TIMEOUT=$MODEL_TIMEOUT "$WORK/inference"
+  MODEL_CAPACITY=$MODEL_CAPACITY MODEL_LATENCY=$MODEL_LATENCY MODEL_TIMEOUT=$MODEL_TIMEOUT MODEL_JITTER=$MODEL_JITTER "$WORK/inference"
 TOKEN=$(openssl rand -hex 16)
 PUBLIC_URL="http://127.0.0.1:${INGEST_PORT}"
 supervise ingest env INGEST_PORT=$INGEST_PORT INGEST_PUBLIC_URL=$PUBLIC_URL TWILIO_AUTH_TOKEN=$TOKEN \

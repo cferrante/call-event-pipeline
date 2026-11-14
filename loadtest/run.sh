@@ -18,7 +18,9 @@ RATE=${RATE:-1000} RAMP=${RAMP:-10s} HOLD=${HOLD:-60s} DUP_RATE=${DUP_RATE:-0.05
 IDLE=${IDLE:-20s} IDLE_RATE=${IDLE_RATE:-20}
 # The load-test model profile: 20× faster than the service default (200ms, 2s) with the same
 # ratios, so ~400 messages/s fit through 4 workers and a run drains in minutes, not an hour.
-MODEL_LATENCY=${MODEL_LATENCY:-10ms} MODEL_TIMEOUT=${MODEL_TIMEOUT:-200ms} MODEL_CAPACITY=${MODEL_CAPACITY:-4}
+# The model runs 31 times faster than the calibrated real one (309 ms), so a spike drains in
+# minutes; what the test proves (flat model latency, no loss) does not depend on the scale.
+MODEL_LATENCY=${MODEL_LATENCY:-10ms} MODEL_TIMEOUT=${MODEL_TIMEOUT:-200ms} MODEL_CAPACITY=${MODEL_CAPACITY:-4} MODEL_JITTER=${MODEL_JITTER:-0.1}
 case "$MODE" in
   normal) INFERENCE_WORKERS=${INFERENCE_WORKERS:-$MODEL_CAPACITY}; DRAIN_TIMEOUT=${DRAIN_TIMEOUT:-600} ;;
   control) INFERENCE_WORKERS=${INFERENCE_WORKERS:-200}; DRAIN_TIMEOUT=${DRAIN_TIMEOUT:-900} ;;
@@ -100,7 +102,7 @@ sql "INSERT INTO tracking_numbers (phone_e164, campaign_id, source) VALUES
 
 log "starting inference: ${INFERENCE_WORKERS} workers; model capacity ${MODEL_CAPACITY}, ${MODEL_LATENCY}, timeout ${MODEL_TIMEOUT}"
 DATABASE_URL="$DB_URL" NATS_URL="$NATS_URL_LT" INFERENCE_WORKERS=$INFERENCE_WORKERS \
-  MODEL_CAPACITY=$MODEL_CAPACITY MODEL_LATENCY=$MODEL_LATENCY MODEL_TIMEOUT=$MODEL_TIMEOUT \
+  MODEL_CAPACITY=$MODEL_CAPACITY MODEL_LATENCY=$MODEL_LATENCY MODEL_TIMEOUT=$MODEL_TIMEOUT MODEL_JITTER=$MODEL_JITTER \
   "$WORK/inference" >"$RESULTS/inference.log" 2>&1 &
 pids+=($!)
 

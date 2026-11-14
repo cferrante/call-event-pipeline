@@ -232,6 +232,14 @@ On branch `m3-spec`; merged before any code. The spec changes are in
 
 `/code-review` on the M3 changes; fix or decline each finding and record outcomes below.
 
+### Optional: fall back to the stub, and record which model answered
+
+When Groq refuses (daily budget used up, rate limit, outage), classify with the stub instead of
+retrying, and store which model answered, so a demo or a quota never leaves messages waiting.
+Each insight already stores `model_version` (`groq/…` or `stub-v1`); the work is the fallback
+itself and showing the split on the status page. Free; about an hour, test-first. cferrante-dev
+falls back to Amazon Bedrock instead, which costs cents per call and needs the AWS SDK.
+
 ### Optional: real alert email through Amazon SES
 
 `SESAlerter` behind the same interface, in SES's sandbox (verified recipient only). Only if a
@@ -260,7 +268,7 @@ deviations below and in [benchmarks](benchmarks.md).
 | 12: crash test | [#21](https://github.com/cferrante/call-event-pipeline/pull/21) | 23 `kill -9`s under 100/s: 24,001 webhooks, none lost or duplicated, identical to the clean run; acking before saving loses data |
 | 13: AWS bootstrap 🧑 | [#22](https://github.com/cferrante/call-event-pipeline/pull/22), [#24](https://github.com/cferrante/call-event-pipeline/pull/24) | Account, sign-in, $10 budget and Groq key exist: `check.sh` went from ✗ (exit 1) to "Bootstrap complete" (exit 0). A 3-hour demo session costs $0.70 at today's prices, so 14 fit in the budget |
 | 14: demo environment | [#25](https://github.com/cferrante/call-event-pipeline/pull/25) | `make demo-up` builds both instances, ships the code and passes an end-to-end smoke test through Systems Manager in under 6 minutes; `demo-down` leaves nothing (46 s). A plan that opens an address range or drops the expiry guard is refused before apply, and the guard really terminates an instance (30 s from firing to `terminated`) |
-| 15: real model | [#27](https://github.com/cferrante/call-event-pipeline/pull/27) | A hosted model classifies the synthetic set at 98% against the stub rules' 54%, at p50 309 ms / p95 519 ms; the limiter keeps it free of 429s, which start between 30 and 40 calls a minute without it. Updating the stub's load-test profile awaits a decision |
+| 15: real model | [#27](https://github.com/cferrante/call-event-pipeline/pull/27) | A hosted model classifies the synthetic set at 98% against the stub rules' 54%, at p50 309 ms / p95 519 ms; the limiter keeps it free of 429s, which start between 30 and 40 calls a minute without it. The stub's default now reproduces the measured p50 and p95 within 5% ([#28](https://github.com/cferrante/call-event-pipeline/pull/28)) |
 
 ## Deviations from the plan
 
@@ -517,6 +525,17 @@ deviations below and in [benchmarks](benchmarks.md).
 - **Step 15: the stub's load-test profile is not yet replaced.** The measured p50 is 309 ms,
   31 times the load tests' 10 ms; at that latency each spike run's backlog takes over an hour
   to drain, which would lengthen step 16's AWS session. A decision for the owner.
+
+- **Step 15: decided (option A) — the load tests stay 31 times faster than the real model.**
+  The stub's default is now the calibrated 309 ms ±75%, tested to reproduce the measured p50
+  and p95 within 5%; the spike and crash tests pin their M2 profile, 10 ms ±10% (a new
+  `MODEL_JITTER` setting keeps the jitter as before), so their results stay comparable and a
+  spike drains in minutes rather than over an hour. What the tests prove doesn't depend on the
+  scale.
+- **Order changed: the demo path comes before the benchmarks.** At the owner's request (to demo
+  on AWS sooner), k6 on the load generator, `make demo-spike` and the status page forwarded
+  through Session Manager move ahead of step 16, which then reuses them. Recording which model
+  answered, with a fallback to the stub, is added as an optional item.
 
 ## Code-review outcomes
 

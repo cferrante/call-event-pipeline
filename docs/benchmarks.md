@@ -35,7 +35,9 @@ duplicates).
 
 Rows come from the same runs as the table above (`run.sh` prints both). **Mode** is `normal`
 (workers = model capacity) or `control` (the limit removed). The load-test model profile is
-10 ms latency, 200 ms timeout, capacity 4 (see the [M2 plan](plan-m2.md#deviations-from-the-plan)).
+10 ms latency ±10%, 200 ms timeout, capacity 4 (see the [M2 plan](plan-m2.md#deviations-from-the-plan)):
+31 times faster than the calibrated real model, so a spike drains in minutes. The stub's own
+default is the calibrated profile, 309 ms ±75% ([model calibration](#model-calibration-m3)).
 Model latency should stay flat in `normal`; time to insight rises during the spike by design.
 
 ## Crash test (M3)
