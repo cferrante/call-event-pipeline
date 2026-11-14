@@ -31,8 +31,10 @@ STEPS.forEach((rate, i) => {
     startTime: `${i * stepSeconds}s`,
     // Enough VUs that k6 never drops an iteration while the server is still fast: at 50 ms a
     // request, rate × 0.05 are in flight.
-    preAllocatedVUs: Math.max(50, Math.ceil(rate * 0.05)),
-    maxVUs: Math.max(500, rate),
+    // PREALLOC sets it directly: starting VUs mid-test is slow, and the iterations k6 drops
+    // meanwhile would be counted against the server.
+    preAllocatedVUs: Number(__ENV.PREALLOC) || Math.max(50, Math.ceil(rate * 0.05)),
+    maxVUs: Math.max(500, rate, Number(__ENV.PREALLOC) || 0),
     env: { RATE: String(rate) },
   };
   // A threshold per step makes k6 keep that step's own latency and error figures.

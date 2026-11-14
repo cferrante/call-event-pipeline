@@ -3,6 +3,7 @@
 # load generator at a rate that steps up every STEP, with both machines' CPU sampled, to find
 # the highest rate the edge sustains with p99 < 50 ms and no errors.
 #   STEPS=500,1000,2000,3000,4000,5000,6000,8000 STEP=60s make demo-stepup   (defaults)
+#   PREALLOC=1000   virtual users started up front (default 5% of each step's rate)
 # It measures the edge (ingest and NATS): the consumers and monitor are stopped during the
 # test, and afterwards the stream is emptied and every service restarted, because the steps
 # send far more webhooks than the consumers could drain in a session. Postgres is untouched.
@@ -37,7 +38,7 @@ remote "$sut" "$sampler" >/dev/null && remote "$loadgen" "$sampler" >/dev/null |
 act "stepping up: $STEPS per second, $STEP each (about $(( n * step_s / 60 )) minutes; run $prefix)"
 k6out=$(remote "$loadgen" "set -a; . /etc/cep/config.env; . /run/cep/env; set +a
 export TARGET=http://$sut_ip:8081 PUBLIC_URL=\"\$INGEST_PUBLIC_URL\" TOKEN=\"\$TWILIO_AUTH_TOKEN\"
-export STEPS=$STEPS STEP=$STEP PREFIX=$prefix SUMMARY_FILE=/tmp/stepup.env
+export STEPS=$STEPS STEP=$STEP PREALLOC=${PREALLOC:-} PREFIX=$prefix SUMMARY_FILE=/tmp/stepup.env
 echo START=\$(date +%s)
 cd /tmp && /opt/cep/bin/k6 run --quiet /opt/cep/stepup.js 2>/tmp/k6-stepup.err >/dev/null || true
 cat /tmp/stepup.env") || die "k6 failed on the load generator"
