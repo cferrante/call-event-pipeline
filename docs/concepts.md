@@ -223,6 +223,14 @@ everything down.
 *In this project:* the stub model serves 4 calls at once; each call beyond that makes all of them
 slower.
 
+### Chaos test
+
+Breaking a running system on purpose, at random, to prove it recovers without losing or
+corrupting data, instead of assuming it does.
+*In this project:* `loadtest/crash.sh` `kill -9`s a random service every 5–15 s under load, at
+least 20 times, and checks the data against a [test oracle](#test-oracle); `KILLS=0` is the
+clean run it must match. See [design section 5.5](design.md#55-delivery-guarantees).
+
 ### Congestion collapse
 
 When an overloaded system gets *less* useful work done the more it's given, because effort goes
@@ -264,6 +272,13 @@ but not yet processed. JetStream reports it as `num_pending`.
 The edge accepted every webhook in about a millisecond the whole time. More details are in
 [benchmarks](benchmarks.md).
 
+### Contract test
+
+A test that checks one side of an agreement between two programs against a shared, published
+description of it, so each side can change independently and still be checked against the other.
+*In this project:* the [schema contract](#schema-contract): the producer's test checks what it
+publishes, and each consumer's test processes every published example.
+
 ### Control experiment
 
 A run with the thing being tested taken away, to check it's actually what makes the
@@ -277,6 +292,14 @@ A load-testing trap: if the test waits for each response before sending the next
 slow server receives fewer requests exactly when it's struggling, and the results look better
 than reality. Twilio doesn't wait for you, so neither should the test.
 *In this project:* avoided by using an [arrival rate](#arrival-rate).
+
+### CPU profile
+
+A recording of where a program spends its CPU time, taken by sampling which function is running
+many times a second. It shows what to optimise, or that there is nothing worth optimising.
+*In this project:* Go's `pprof`, switched on with `PPROF_ADDR` (loopback only). On the server our
+own code was 0.1–0.5% of the services' CPU, which is why
+[decision record 0001](decisions/0001-event-stream.md#the-c-question) rejects a rewrite in C++.
 
 ### Dead-letter queue
 
@@ -519,6 +542,14 @@ Many Requests`, often with a header saying when to try again.
 *In this project:* SendGrid's Mail Send API sends `X-RateLimit-Reset`; the alert queue waits
 until then before retrying.
 
+### Reconciliation
+
+Comparing two records of the same events and counting the differences, to find work that was
+lost or done twice without trusting either side's own report.
+*In this project:* the monitor's *acked but not written* rule reconciles what attribution
+acknowledged to the stream against rows written to Postgres; the crash and drill scripts
+reconcile the database against the webhooks sent.
+
 ### Redelivery
 
 JetStream sending a message again, after a [nak](#nak) or when [AckWait](#ackwait) expires.
@@ -547,6 +578,14 @@ with tests on both sides, so a breaking change fails a test instead of productio
 checks every [envelope](#envelope) validates, and each consumer must process every published
 example. See [design section 6.1](design.md#61-the-schema-as-a-contract-m3).
 
+### Session Manager
+
+An AWS service that opens a shell or forwards a port to an instance through an agent on the
+instance that calls out to AWS, so the instance needs no open inbound port or SSH key.
+*In this project:* `make demo-status` forwards the status page and alert inbox to localhost
+through it; scripted commands use its sibling, Run Command. See the
+[demo environment](../infra/demo/README.md).
+
 ### Silent failure
 
 A failure that raises no error: the process stays up and looks healthy while its work is
@@ -571,6 +610,15 @@ on how long or how much it keeps.
 The address a NATS message is published to: dot-separated words like `leads.raw.sms`.
 Wildcards: `*` matches exactly one word (`leads.raw.*`); `>` matches one or more words at the
 end (`leads.>`).
+
+### Sync interval
+
+How often JetStream forces its writes from the operating system's memory onto the disk. An
+acknowledged message is safe if the process dies, but a power loss can lose writes since the
+last sync.
+*In this project:* the default is every 2 minutes. Syncing every write (`always`) capped the
+edge at 300–500 webhooks/s on the server; replicating to three nodes is the production answer
+([decision record 0001](decisions/0001-event-stream.md#durability-and-sync_interval)).
 
 ### Term
 
@@ -602,6 +650,14 @@ stream ([consumer lag](#consumer-lag)) plus [model latency](#model-latency).
 *In this project (M2):* expected to rise during a spike, while work waits its turn, and to
 recover afterwards. That's the design working: the wait happens in the queue, not inside an
 overloaded model. See the [M2 plan](plan-m2.md#d5-what-to-measure).
+
+### Tolerant reader
+
+A consumer that reads only the fields it needs and ignores ones it doesn't recognise, so a
+producer can add fields without breaking it.
+*In this project:* both consumers ignore unknown fields, and a published example with an
+extra field (`withheld-caller-unknown-field.json`) proves it; an unknown *schema version* is
+still rejected, because that could change what known fields mean.
 
 ### Tracking number
 
