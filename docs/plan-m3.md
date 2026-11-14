@@ -579,6 +579,25 @@ deviations below and in [benchmarks](benchmarks.md).
 - **Demo path: a session costs a few cents.** `demo-up` took 90 s this time and the whole
   verification about 15 minutes of instance time, roughly $0.06 at the price list's rates.
 
+- **Step 16: the step-up measures the edge alone.** Its steps send about 1.8 million webhooks,
+  which inference (capped at 400/s) would take over an hour to drain, loading the server during
+  later steps. The consumers and monitor are paused during it, and afterwards the stream is
+  emptied and the services restarted. Attribution's own rate is measured separately.
+- **Step 16: profiles come back through Run Command,** in base64 chunks with a checksum,
+  instead of giving the instances write access to S3; their role stays read-only.
+- **Step 16: `run.sh` keeps building its own binaries.** The AWS spikes run through
+  `make demo-spike` (now with `MODE=control` and `PROFILE=1`), so only `crash.sh` needed
+  `BIN_DIR`. Shown failing first: with Go off the `PATH`, it stopped at `go: command not
+  found`; with `BIN_DIR` it passed with the same checksum checks.
+- **Step 16: the demo scripts are proven in pieces locally and end to end on the server.**
+  Checked locally: the drain check's SQL against the development database, the chunked file
+  fetch (a deliberate one-character overlap fails its checksum), the per-step CPU arithmetic
+  on synthetic counters, and `stepup.js` at 20–100/s (a wrong signing token fails every step
+  and exits 99). The drill's own deliberate break is the fault itself: the run fails unless the
+  fault loses data.
+- **Step 16: the default sync interval is verified,** not assumed: `nats-server` 2.15.1 reports
+  `sync_interval` 120 s in `/varz` by default, and `sync_always: true` with `always`.
+
 ## Code-review outcomes
 
 None yet.

@@ -65,3 +65,33 @@ remote() {
     --query '[StandardOutputContent, StandardErrorContent]' --output text | sed '/^None$/d; s/^/    /'
   [[ $status == Success ]]
 }
+
+# secs DURATION : a k6-style duration (90s, 2m, 1m30s, 0s) in whole seconds.
+secs() {
+  local d=$1 total=0 n unit
+  while [[ $d =~ ^([0-9]+)([hms])(.*)$ ]]; do
+    n=${BASH_REMATCH[1]} unit=${BASH_REMATCH[2]} d=${BASH_REMATCH[3]}
+    case $unit in h) total=$((total + n * 3600)) ;; m) total=$((total + n * 60)) ;; s) total=$((total + n)) ;; esac
+  done
+  [[ -z $d ]] || die "can't read the duration $1"
+  echo "$total"
+}
+
+# A script for `remote`: how many alert emails the mail sink on the system under test holds.
+ALERT_COUNT="curl -sf http://127.0.0.1:8025/messages | python3 -c 'import json,sys; print(len(json.load(sys.stdin) or []))'"
+
+# fetch_file INSTANCE_ID REMOTE_PATH LOCAL_PATH : copies a file back through Run Command, in
+# base64 chunks under its 24,000-character output limit, and checks its SHA-256. The instances
+# can only read from S3, and this keeps it that way.
+fetch_file() {
+  local id=$1 path=$2 dest=$3 len want off chunk=20000
+  read -r len want <<<"$(remote "$id" "test -s $path && echo \$(base64 -w0 $path | wc -c) \$(sha256sum <$path | cut -d' ' -f1)" | tr -s ' \t\n' ' ')" ||
+    return 1
+  [[ -n $want ]] || return 1
+  : >"$dest.b64"
+  for ((off = 1; off <= len; off += chunk)); do
+    remote "$id" "base64 -w0 $path | cut -c $off-$((off + chunk - 1))" | tr -d ' \t\n' >>"$dest.b64" || return 1
+  done
+  base64 -d "$dest.b64" >"$dest" && rm -f "$dest.b64"
+  [[ $(sha256sum <"$dest" | cut -d' ' -f1) == "$want" ]] || { echo "    $dest: checksum mismatch" >&2; return 1; }
+}

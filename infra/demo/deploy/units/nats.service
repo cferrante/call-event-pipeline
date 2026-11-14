@@ -6,7 +6,8 @@ After=network-online.target
 [Service]
 User=cep
 # Clients and the monitoring port listen on loopback only.
-ExecStart=/opt/cep/bin/nats-server -a 127.0.0.1 -js -sd /var/lib/cep/nats -m 8222
+# JetStream's settings, including its disk sync interval, are in nats.conf (nats-sync.sh).
+ExecStart=/opt/cep/bin/nats-server -c /etc/cep/nats.conf -a 127.0.0.1 -m 8222
 Restart=on-failure
 LimitNOFILE=65536
 

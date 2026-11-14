@@ -31,6 +31,12 @@ a signed-in profile: `aws sso login --profile <PROJECT_PROFILE>`.
 |---|---|---|
 | `make demo-up` | Plans, **checks the plan** (below), applies, builds the binaries for `linux/arm64`, ships them through the S3 bucket, generates the demo's secrets into SSM, installs, then runs the smoke test. Re-running ships a new release to the same instances | about $0.23/hour while up ($0.70 for a full 3-hour session) |
 | `make demo-spike` | A webhook spike from the load generator (default 1,000/s for 30 s, after a 10 s idle period), printing the backlog as it rises and drains, then checking every accepted webhook was stored and classified exactly once. Each run has its own CallSid prefix, so it can be repeated. `RATE=200 HOLD=10s make demo-spike` for a smaller one | $0 beyond the session |
+| `MODE=control make demo-spike` | The same spike with inference's limit removed (200 workers against the model's capacity of 4): the model overloads, as in the M2 control run. `PROFILE=1` adds 30 s CPU profiles of ingest and attribution during the hold, saved to `infra/demo/.build/profiles/` | $0 beyond the session |
+| `make demo-stepup` | The edge step-up: webhooks in 60 s steps from 500 to 8,000/s, with p99, errors and both machines' CPU for each step. Measures the edge alone: the consumers and monitor are paused, and afterwards the stream is emptied and every service restarted (Postgres is untouched) | $0 beyond the session |
+| `make demo-throughput` | Attribution's drain rate: 100,000 webhooks queued with the consumers stopped, then attribution started alone, timed, with its CPU, Postgres's CPU and a profile | $0 beyond the session |
+| `make demo-crash` | `loadtest/crash.sh` on the system under test (its own database and NATS server): `kill -9` of random services under 100/s, then the data checked against what the webhooks imply. `KILLS=0` is the clean run | $0 beyond the session |
+| `make demo-fault` | The silent-failure drill: attribution's `faultinject` build acknowledges without writing; times the `[FIRING]` email, then replays the gap and checks nothing is lost and a second replay changes nothing | $0 beyond the session |
+| `SYNC=always make demo-nats-sync` | Sets JetStream's disk sync (`always`, or `default`: every 2 minutes) and restarts NATS; prints the setting NATS reports | $0 |
 | `make demo-status` | Forwards the monitor's status page to <http://localhost:18090> and the alert inbox to <http://localhost:18025/messages> through Session Manager; Ctrl-C stops. Needs the Session Manager plugin (below) | $0 |
 | `make demo-smoke` | `/healthz` and every service on the system under test; a signed SMS webhook from the load generator, found in Postgres; the expiry timer on both | $0 |
 | `make demo-down` | `tofu destroy`, deletes the demo's secrets, then `check.sh` | $0 |
@@ -74,8 +80,8 @@ session-manager-plugin --version
 | Path | What |
 |---|---|
 | `*.tf`, `cloud-init.yaml.tftpl` | The environment. State is local and git-ignored |
-| `deploy/` | What ships to the instances: `setup.sh`, `fetch-secrets.sh`, the systemd units (`cep@.service` runs any of the services), and `stats.sh` / `drain.sh`, which the demo scripts run on the system under test |
-| `up.sh`, `smoke.sh`, `spike.sh`, `status.sh`, `down.sh`, `check.sh` | The `make` targets; helpers in `lib.sh` |
+| `deploy/` | What ships to the instances: `setup.sh`, `fetch-secrets.sh`, the systemd units (`cep@.service` runs any of the services), and the scripts the demo targets run on the system under test: `stats.sh`, `drain.sh`, `throughput.sh`, `nats-sync.sh`, `reset-stream.sh` |
+| `up.sh`, `smoke.sh`, `spike.sh`, `stepup.sh`, `throughput.sh`, `crash.sh`, `fault.sh`, `remote-nats-sync.sh`, `status.sh`, `down.sh`, `check.sh` | The `make` targets; helpers in `lib.sh` |
 
 ## On the instances
 
