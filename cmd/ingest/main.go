@@ -16,6 +16,7 @@ import (
 	"github.com/nats-io/nats.go/jetstream"
 
 	"github.com/cferrante/call-event-pipeline/internal/envelope"
+	"github.com/cferrante/call-event-pipeline/internal/profiling"
 	"github.com/cferrante/call-event-pipeline/internal/stream"
 )
 
@@ -36,6 +37,12 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Opt-in CPU profiles for the benchmarks; a bad address stops the service at startup.
+	_, stopPprof, err := profiling.Start(cfg.pprofAddr)
+	if err != nil {
+		return err
+	}
+	defer stopPprof()
 
 	nc, err := nats.Connect(cfg.natsURL, nats.Name("ingest"))
 	if err != nil {

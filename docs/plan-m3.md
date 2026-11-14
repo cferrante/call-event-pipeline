@@ -201,6 +201,33 @@ On branch `m3-spec`; merged before any code. The spec changes are in
   recorded too.
 - Commit: *Record server benchmarks*.
 
+#### Step 16 in detail (agreed before the tooling)
+
+The demo path ([#29](https://github.com/cferrante/call-event-pipeline/pull/29)) already runs a
+spike from the load generator and checks it. Six of the eight measurements need more tooling,
+built and tested locally first ($0), then run in **one AWS session** (about 90 minutes, within
+the 3-hour guard: $0.35–0.70).
+
+| Measurement | How on AWS | New tooling (test first) |
+|---|---|---|
+| 1,000/s spike, normal and control | `make demo-spike` with the standard 60 s hold, three normal runs (variance) and one control | `MODE=control` restarts inference with 200 workers; the checks allow control's dead letters |
+| CPU profiles | 30 s of `ingest` and `attribution` profile taken during a normal spike, summarised as our code against syscalls, runtime and waiting | `PPROF_ADDR` in both services: off unless set, loopback only. Test: the endpoint answers only when set |
+| Edge step-up | k6 from the load generator in 60 s steps (500, 1,000, 2,000, 3,000/s, …) until p99 ≥ 50 ms or an error; load generator CPU sampled each step | `loadtest/stepup.js` reporting p99 and errors per step; `make demo-stepup`. Tried locally at small rates first |
+| Attribution sustained throughput | Attribution stopped, 100,000 webhooks queued, then started: messages/s while draining, with a profile and Postgres CPU to name the bottleneck | `make demo-throughput` |
+| Crash test | The existing `loadtest/crash.sh`, run on the system under test (isolated database and NATS, as locally): 100/s for 240 s, ≥ 20 kills, then `KILLS=0` | `crash.sh` and `run.sh` take prebuilt binaries (`BIN_DIR`) instead of `go build`; k6 shipped to the server. At 100/s k6's CPU doesn't matter, and the checks stay identical to the local rows |
+| Monitor detection, false alerts | Drill: a `faultinject` attribution build swapped in, fault on under 50/s; time to the `[FIRING]` email. False alerts: the mail sink must stay empty across the normal spikes | `make demo-fault`: ships the drill build, toggles it with `SIGUSR1`, reads the mail sink |
+| Replay recovery | After the drill: `attribution -replay-from <fault start>`; rows must equal accepted webhooks, and a second replay changes nothing | Part of `demo-fault` |
+| `sync_interval: always` | NATS restarted with it, the normal spike repeated; edge p99 against the default runs. The default interval is read from `/varz`, not assumed | `NATS_SYNC=always` in the demo's NATS unit |
+
+**Assumption to check on the server:** the 2-vCPU load generator may saturate before the server
+does in the step-up. If its CPU passes 80%, the result is recorded as "at least N/s, limited by
+the load generator", and a larger load generator (c7g.xlarge, about +$0.07/hour) is a decision
+for the owner.
+
+**PRs:** (1) `pprof` opt-in; (2) benchmark tooling (control mode, step-up, throughput,
+`BIN_DIR` for the crash test, drill and replay, sync interval); (3) the AWS session's results
+in [benchmarks](benchmarks.md) and here.
+
 ### Step 17: Postmortem
 
 - From an injected incident on the server: blameless, with timeline from logs, time to detect,

@@ -24,6 +24,7 @@ type config struct {
 	publicURL string // INGEST_PUBLIC_URL, without a trailing slash
 	natsURL   string // NATS_URL
 	forwardTo string // INGEST_FORWARD_TO, optional
+	pprofAddr string // PPROF_ADDR: serve CPU profiles on this loopback address; off if empty
 	// sendgridKey verifies Inbound Parse signatures (SENDGRID_PUBLIC_KEY, optional). Without
 	// it the email route is off.
 	sendgridKey *ecdsa.PublicKey
@@ -41,6 +42,7 @@ func loadConfig() (config, error) {
 		authToken: os.Getenv("TWILIO_AUTH_TOKEN"),
 		natsURL:   env.NATSURL(),
 		forwardTo: os.Getenv("INGEST_FORWARD_TO"),
+		pprofAddr: os.Getenv("PPROF_ADDR"),
 	}
 	if cfg.authToken == "" {
 		return config{}, errors.New("TWILIO_AUTH_TOKEN is required")
@@ -77,6 +79,7 @@ func (c config) LogValue() slog.Value {
 		slog.String("public_url", c.publicURL),
 		slog.String("nats_url", c.natsURL),
 		slog.String("forward_to", c.forwardTo),
+		slog.String("pprof_addr", c.pprofAddr),
 		slog.Bool("email_enabled", c.sendgridKey != nil),
 	)
 }

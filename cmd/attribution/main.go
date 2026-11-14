@@ -23,6 +23,7 @@ import (
 	"github.com/cferrante/call-event-pipeline/internal/attribution"
 	"github.com/cferrante/call-event-pipeline/internal/consumer"
 	"github.com/cferrante/call-event-pipeline/internal/migrate"
+	"github.com/cferrante/call-event-pipeline/internal/profiling"
 	"github.com/cferrante/call-event-pipeline/internal/stream"
 	"github.com/cferrante/call-event-pipeline/migrations"
 )
@@ -49,6 +50,12 @@ func run() error {
 	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
+	// Opt-in CPU profiles for the benchmarks; a bad address stops the service at startup.
+	_, stopPprof, err := profiling.Start(cfg.pprofAddr)
+	if err != nil {
+		return err
+	}
+	defer stopPprof()
 
 	db, err := pgxpool.New(ctx, cfg.databaseURL)
 	if err != nil {
