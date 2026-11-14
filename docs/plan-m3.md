@@ -301,7 +301,8 @@ deviations below and in [benchmarks](benchmarks.md).
 | (fix) | [#33](https://github.com/cferrante/call-event-pipeline/pull/33) | `acked_not_written` no longer fires under heavy retries: the monitor counts acknowledgements without the ack floor; a repeated control run on AWS raised only the correct `stale_backlog` |
 | 17: postmortem | [#34](https://github.com/cferrante/call-event-pipeline/pull/34) | A silent write failure on the server was detected in 6.5 s and all 621 lost calls replayed; the write-up names a misleading second alert and "resolved isn't recovered" as follow-ups |
 | 18: decision record | [#35](https://github.com/cferrante/call-event-pipeline/pull/35) | JetStream stays: at 1M–100M events a month every option handles the load and cost is nearly all fixed (Kinesis on demand ~$60–80, three NATS nodes $164, MSK $462+); JetStream wins on per-message retries, dead letters and deduplication in the broker and on $0 native tests. Our code is 0.1–0.5% of CPU, so no C++ |
-| 19: pitch | #36 | M3's results told for a non-technical reader on one page: no loss in a 1,000/s rush, 23 crashes with identical data, a hidden failure emailed in 5–7 s and fully restored, 98% accurate classification, $0.28 of server tests |
+| 19: pitch | [#36](https://github.com/cferrante/call-event-pipeline/pull/36) | M3's results told for a non-technical reader on one page: no loss in a 1,000/s rush, 23 crashes with identical data, a hidden failure emailed in 5–7 s and fully restored, 98% accurate classification, $0.28 of server tests |
+| 20: demo runbook | #37 | A 10-minute AWS walkthrough (spike absorbed, silent failure emailed and replayed) with the expected result of each step; seven M3 terms in the concepts guide; README and `CLAUDE.md` show M3's state |
 
 ## Deviations from the plan
 
@@ -651,6 +652,11 @@ deviations below and in [benchmarks](benchmarks.md).
 - **Step 19: the pitch says the rush tests used a stand-in for the AI.** The flat model latency
   was measured with the calibrated stub, not the hosted model, and a non-technical reader
   would otherwise take it as the real model's.
+
+- **Step 20: the runbook is written from the scripts' own output, and rehearsed by the owner.**
+  Each expected result quotes what `demo-up`, `demo-spike`, `demo-fault` and `demo-down`
+  print and check; the click-through run on AWS is the owner's (about $0.25). The concepts
+  guide already had *canary* and *replay*; *contract test* points to *schema contract*.
 
 ## Code-review outcomes
 

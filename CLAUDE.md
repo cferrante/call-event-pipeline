@@ -6,17 +6,18 @@ needs, and doubles as a record of how the project is run for anyone reading the 
 
 ## What this is
 
-A real-time ingestion layer for inbound voice and SMS leads. Webhooks are acknowledged as soon as
+A real-time ingestion layer for inbound voice, SMS and email leads. Webhooks are acknowledged as soon as
 they are durably stored in a stream; independent consumers then attribute each contact to its
 marketing campaign and classify it with an AI model, each at its own pace. The goal is to absorb
 large webhook spikes with zero loss and without slowing down AI inference.
 
 ## Project state
 
-Milestones 1 (ingest and attribution) and 2 (inference with backpressure) are complete.
-Milestone 3 (schema contract and email channel, silent-failure monitor, crash test, on-demand
-AWS environment and server benchmarks) is specified in [the M3 plan](docs/plan-m3.md). Priority
-lanes with the transactional outbox are an M4 candidate.
+Milestones 1 (ingest and attribution), 2 (inference with backpressure) and 3 (schema contract
+and email channel, silent-failure monitor, crash test, on-demand AWS environment, server
+benchmarks, decision record, pitch and demo runbook) have met their goals; see
+[the M3 plan](docs/plan-m3.md), whose last step is the code review. Batched and parallel
+attribution and priority lanes with the transactional outbox are M4 candidates.
 
 This section lags behind the code. Check `cmd/`, `internal/`, `migrations/` and the latest plan
 before concluding something does or doesn't exist.
@@ -32,6 +33,9 @@ before concluding something does or doesn't exist.
 - `docs/benchmarks.md` holds targets and measured results, with the method used.
 - `docs/concepts.md` explains NATS, JetStream and the patterns used. Link to it rather than
   re-explaining a term.
+- `docs/decisions/` holds decision records; `docs/postmortems/` incident write-ups.
+- `docs/demo.md` is the 10-minute demo on AWS; `docs/pitch.md` the one-page summary for a
+  non-technical reader.
 - `README.md` is the entry point for running and trying the system.
 
 ## How we work
