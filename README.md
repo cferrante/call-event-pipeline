@@ -24,17 +24,22 @@ Go · NATS JetStream · PostgreSQL · k6 (load testing). Everything runs nativel
 
 ## Status
 
-Milestones 1 and 2 are complete: webhooks are ingested, attributed and classified by a (stub) AI
-model, and the spike test shows zero loss and flat model latency at 1,000 webhooks/s (see
-[benchmarks](docs/benchmarks.md)). See the [design spec](docs/design.md) for the architecture and
-decisions, and the [M1](docs/plan-m1.md) and [M2](docs/plan-m2.md) plans for how each was built.
+Milestones 1, 2 and 3 have met their goals; M3's final code review is its last step. Results
+were measured on AWS as well as a laptop (see [benchmarks](docs/benchmarks.md)), and the
+[pitch](docs/pitch.md) tells the story in one page. See the [design spec](docs/design.md) for the
+architecture and decisions, and the [M1](docs/plan-m1.md), [M2](docs/plan-m2.md) and
+[M3](docs/plan-m3.md) plans for how each was built.
 
 - **M1:** ingest edge, attribution consumer, dead-letter handling, spike test proving zero
   loss and zero duplicates
 - **M2:** AI inference consumer with backpressure, so inference latency stays flat under load
-- **M3 (in progress):** email channel, schema contract, silent-failure monitor with alert
-  email, replay recovery, and a crash test; server benchmarks on AWS next. What each step
-  proved is in the [M3 plan's progress table](docs/plan-m3.md#progress)
+- **M3:** email channel and schema contract; a silent-failure monitor that emails alerts, with
+  replay recovery; a crash test (23 `kill -9`s, data identical); an on-demand AWS environment
+  and server benchmarks; the [event stream decision](docs/decisions/0001-event-stream.md) and a
+  [postmortem](docs/postmortems/2026-11-14-silent-write-failure.md). To show it live, follow
+  the [10-minute demo](docs/demo.md)
+- **M4 (candidate):** batched and parallel attribution; priority lanes with the transactional
+  outbox
 
 ## Running locally
 
