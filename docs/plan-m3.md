@@ -300,7 +300,8 @@ deviations below and in [benchmarks](benchmarks.md).
 | 16: server benchmarks | [#30](https://github.com/cferrante/call-event-pipeline/pull/30), [#31](https://github.com/cferrante/call-event-pipeline/pull/31), #32 | On AWS: three 1,000/s spikes with no loss and flat model latency (edge p99 ≤ 1.05 ms, runs within 5%); control overloads the model 17×; the edge sustains at least 4,000/s; attribution drains ~620/s, limited by one transaction per message; our code is under 1% of either service's CPU; 23 kills leave the data identical; a silent failure is alerted in 5 s and fully replayed; `sync_interval: always` caps the edge at 300–500/s. $0.28 |
 | (fix) | [#33](https://github.com/cferrante/call-event-pipeline/pull/33) | `acked_not_written` no longer fires under heavy retries: the monitor counts acknowledgements without the ack floor; a repeated control run on AWS raised only the correct `stale_backlog` |
 | 17: postmortem | [#34](https://github.com/cferrante/call-event-pipeline/pull/34) | A silent write failure on the server was detected in 6.5 s and all 621 lost calls replayed; the write-up names a misleading second alert and "resolved isn't recovered" as follow-ups |
-| 18: decision record | #35 | JetStream stays: at 1M–100M events a month every option handles the load and cost is nearly all fixed (Kinesis on demand ~$60–80, three NATS nodes $164, MSK $462+); JetStream wins on per-message retries, dead letters and deduplication in the broker and on $0 native tests. Our code is 0.1–0.5% of CPU, so no C++ |
+| 18: decision record | [#35](https://github.com/cferrante/call-event-pipeline/pull/35) | JetStream stays: at 1M–100M events a month every option handles the load and cost is nearly all fixed (Kinesis on demand ~$60–80, three NATS nodes $164, MSK $462+); JetStream wins on per-message retries, dead letters and deduplication in the broker and on $0 native tests. Our code is 0.1–0.5% of CPU, so no C++ |
+| 19: pitch | #36 | M3's results told for a non-technical reader on one page: no loss in a 1,000/s rush, 23 crashes with identical data, a hidden failure emailed in 5–7 s and fully restored, 98% accurate classification, $0.28 of server tests |
 
 ## Deviations from the plan
 
@@ -647,6 +648,10 @@ deviations below and in [benchmarks](benchmarks.md).
   three-node JetStream cluster at this load and says so; the decision rests on delivery
   semantics and testing, not price.
 
+- **Step 19: the pitch says the rush tests used a stand-in for the AI.** The flat model latency
+  was measured with the calibrated stub, not the hosted model, and a non-technical reader
+  would otherwise take it as the real model's.
+
 ## Code-review outcomes
 
 None yet.
@@ -662,4 +667,4 @@ Measured on AWS (c7g.xlarge, k6 on c7g.large) on 2026-11-14; detail and method i
 | Repeated `kill -9` under load leaves the data identical to a clean run | 23 kills; checksum `607d7f28…`, identical to the clean run (and to the laptop's) |
 | Contract tests catch a breaking change | Step 2 ([#10](https://github.com/cferrante/call-event-pipeline/pull/10)) |
 | Spike, step-up, crash and monitor measured on AWS | Spike ✓ (×3, plus control), step-up ≥ 4,000/s, crash ✓, monitor ✓ with 0 false alerts in normal spikes |
-| Decision record and pitch | Steps 18 and 19 |
+| Decision record and pitch | [Decision record 0001](decisions/0001-event-stream.md) and the [pitch](pitch.md) |
