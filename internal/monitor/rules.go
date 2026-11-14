@@ -31,7 +31,7 @@ type Sample struct {
 
 // ConsumerSample is one consumer's progress.
 type ConsumerSample struct {
-	Acked         uint64    // stream sequence of its ack floor
+	Acked         uint64    // stream position delivered, less the messages still awaiting an ack
 	Written       uint64    // rows it has written
 	DeadLettered  uint64    // messages it has dead-lettered
 	OldestPending time.Time // when its oldest unacknowledged message arrived; zero if none

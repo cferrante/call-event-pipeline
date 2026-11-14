@@ -79,7 +79,14 @@ func (s *Sampler) Sample(ctx context.Context, now time.Time) (Sample, error) {
 		if err != nil {
 			return out, fmt.Errorf("consumer %s info: %w", name, err)
 		}
-		cs := ConsumerSample{Acked: ci.AckFloor.Stream, DeadLettered: s.deadByCo[name]}
+		// Acknowledged: everything delivered except what still awaits an ack. Not the ack
+		// floor, which stalls behind one slow or retried message and then jumps past every
+		// later one, so a window looked like thousands acknowledged and none written.
+		acked := ci.Delivered.Stream
+		if pending := uint64(ci.NumAckPending); pending <= acked {
+			acked -= pending
+		}
+		cs := ConsumerSample{Acked: acked, DeadLettered: s.deadByCo[name]}
 		if err := s.db.QueryRow(ctx, query).Scan(&cs.Written); err != nil {
 			return out, fmt.Errorf("rows written by %s: %w", name, err)
 		}

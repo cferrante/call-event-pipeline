@@ -19,7 +19,7 @@ import (
 	"github.com/cferrante/call-event-pipeline/internal/stream"
 )
 
-// The sampler reads real JetStream and Postgres state: arrivals, each consumer's ack floor,
+// The sampler reads real JetStream and Postgres state: arrivals, each consumer's acknowledgements,
 // rows written, dead letters per consumer, the oldest pending message, and the canary.
 func TestSamplerReadsThePipeline(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
@@ -119,5 +119,74 @@ func TestSamplerReadsThePipeline(t *testing.T) {
 	}
 	if d := again.Consumers["attribution"].DeadLettered; d != 1 {
 		t.Errorf("dead letters on the next sample = %d, want still 1", d)
+	}
+}
+
+// A message still in progress (a slow or retried call) must not hide the acknowledgements after
+// it. The ack floor stays behind it, then jumps past every later message at once, which the
+// acked-but-not-written rule read as thousands acknowledged and none written: four false alerts
+// in step 16's control run (docs/plan-m3.md).
+func TestSamplerCountsAcksPastAMessageInProgress(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	js, err := jetstream.New(natstest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := dbtest.Migrated(t)
+	if err := stream.EnsureStream(ctx, js); err != nil {
+		t.Fatal(err)
+	}
+	attr, err := consumer.EnsureConsumer(ctx, js, consumer.Attribution)
+	if err != nil {
+		t.Fatal(err)
+	}
+	pub := stream.NewPublisher(js)
+	for i := range 5 {
+		env, err := envelope.FromWebhook(envelope.Voice, url.Values{
+			"CallSid": {fmt.Sprintf("CA%d", i)}, "From": {"+14158675310"}, "To": {"+18005550001"},
+		}, time.Now())
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := pub.Publish(ctx, env); err != nil {
+			t.Fatal(err)
+		}
+	}
+	batch, err := attr.Fetch(5, jetstream.FetchMaxWait(2*time.Second))
+	if err != nil {
+		t.Fatal(err)
+	}
+	var first jetstream.Msg
+	for m := range batch.Messages() {
+		if first == nil {
+			first = m // in progress: not acknowledged yet
+			continue
+		}
+		if err := m.DoubleAck(ctx); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := NewSampler(ctx, js, db, "canary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	got, err := s.Sample(ctx, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := got.Consumers["attribution"].Acked; a != 4 {
+		t.Errorf("acked = %d with message 1 in progress and 2–5 acknowledged, want 4", a)
+	}
+
+	if err := first.DoubleAck(ctx); err != nil {
+		t.Fatal(err)
+	}
+	got, err = s.Sample(ctx, time.Now())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a := got.Consumers["attribution"].Acked; a != 5 {
+		t.Errorf("acked = %d after message 1 is acknowledged too, want 5", a)
 	}
 }
