@@ -17,6 +17,11 @@ Numbers are only comparable between rows with the same machine.
 | 2026-10-28 | `8fcfd76` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s; + inference (control) | 0.71 / 3.66 ms | 0.000% | 41741 | 90s | ✓ 67999 | 10 (inference) |
 | 2026-10-28 | `b0c2515` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s; + inference (normal) | 0.67 / 3.04 ms | 0.000% | 40749 | 142s | ✓ 67999 | 0 |
 | 2026-10-28 | `b0c2515` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s; + inference (control) | 0.71 / 3.17 ms | 0.000% | 41671 | 682s | ✓ 67999 | 0 |
+| 2026-11-14 | `597128a`+fix | AWS c7g.xlarge (k6 on c7g.large) | 1000/s, ramp 10s, hold 30s; + inference (demo spike) | 0.45 / 0.96 ms | 0.000% | ~14600 | 69s | ✓ 37799 | 0 |
+
+The AWS row is `make demo-spike` (a 30 s hold, so not directly comparable with the 60 s rows);
+its peak lag is sampled every few seconds, so approximate, and "drained" covers both consumers.
+Step 16 repeats the standard 60 s spike on the same machines.
 
 Columns: **Load** is peak rate, ramp and hold. **Edge** latency is k6's view of the ingest
 service. **Peak lag** is the attribution consumer's largest backlog, and **Drained after** is how

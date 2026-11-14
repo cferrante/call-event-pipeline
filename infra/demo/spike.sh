@@ -25,7 +25,7 @@ act "spike: idle ${IDLE_RATE}/s for $IDLE, ramp to ${RATE}/s over $RAMP, hold $H
   done
 ) &
 sampler=$!
-trap 'kill $sampler 2>/dev/null' EXIT
+trap 'kill $sampler 2>/dev/null || true' EXIT
 # The signing token reaches k6 through its environment, never its command line.
 k6out=$(remote "$loadgen" "set -a; . /etc/cep/config.env; . /run/cep/env; set +a
 export TARGET=http://$sut_ip:8081 PUBLIC_URL=\"\$INGEST_PUBLIC_URL\" TOKEN=\"\$TWILIO_AUTH_TOKEN\"
@@ -39,7 +39,7 @@ accepted=$(value UNIQUE_ACCEPTED "$k6out") sent=$(value UNIQUE_SENT "$k6out")
 
 act "k6 done; waiting for both consumers to drain (up to ${DRAIN_TIMEOUT}s)"
 res=$(remote "$sut" "/opt/cep/drain.sh $prefix $accepted $DRAIN_TIMEOUT $dlq_before") || die "drain check failed"
-kill $sampler 2>/dev/null
+kill $sampler 2>/dev/null || true
 rows=$(value ROWS "$res") insights=$(value INSIGHTS "$res") drained=$(value DRAINED_S "$res")
 
 fails=0
@@ -59,4 +59,5 @@ check "nothing lost or duplicated: $rows calls stored for $accepted accepted ($s
 check "every call classified: $insights insights" test "$insights" -ge "$accepted" -a "$insights" -le "$sent"
 check "no dead letters" test "$(value NEW_DEAD_LETTERS "$res")" = 0
 check "drained within ${DRAIN_TIMEOUT}s" test "$drained" != none
-(( fails == 0 ))
+# An explicit exit: otherwise the EXIT trap's last command would set the status.
+exit $(( fails > 0 ))

@@ -269,6 +269,7 @@ deviations below and in [benchmarks](benchmarks.md).
 | 13: AWS bootstrap 🧑 | [#22](https://github.com/cferrante/call-event-pipeline/pull/22), [#24](https://github.com/cferrante/call-event-pipeline/pull/24) | Account, sign-in, $10 budget and Groq key exist: `check.sh` went from ✗ (exit 1) to "Bootstrap complete" (exit 0). A 3-hour demo session costs $0.70 at today's prices, so 14 fit in the budget |
 | 14: demo environment | [#25](https://github.com/cferrante/call-event-pipeline/pull/25) | `make demo-up` builds both instances, ships the code and passes an end-to-end smoke test through Systems Manager in under 6 minutes; `demo-down` leaves nothing (46 s). A plan that opens an address range or drops the expiry guard is refused before apply, and the guard really terminates an instance (30 s from firing to `terminated`) |
 | 15: real model | [#27](https://github.com/cferrante/call-event-pipeline/pull/27) | A hosted model classifies the synthetic set at 98% against the stub rules' 54%, at p50 309 ms / p95 519 ms; the limiter keeps it free of 429s, which start between 30 and 40 calls a minute without it. The stub's default now reproduces the measured p50 and p95 within 5% ([#28](https://github.com/cferrante/call-event-pipeline/pull/28)) |
+| demo path (before 16) | [#29](https://github.com/cferrante/call-event-pipeline/pull/29) | On AWS, `make demo-spike` sent 1,000 webhooks/s: 37,799 accepted, stored and classified exactly once, edge p99 0.96 ms, drained in 69 s, no false alerts. Stopping attribution fails the run, fires and then resolves *arrivals stopped* by email, and loses nothing. `make demo-status` shows the status page and alert inbox through Session Manager |
 
 ## Deviations from the plan
 
@@ -536,6 +537,20 @@ deviations below and in [benchmarks](benchmarks.md).
   on AWS sooner), k6 on the load generator, `make demo-spike` and the status page forwarded
   through Session Manager move ahead of step 16, which then reuses them. Recording which model
   answered, with a fallback to the stub, is added as an optional item.
+
+- **Demo path: verified on AWS on 2026-11-14.** A 1,000/s spike (30 s hold) passed all five
+  checks with no alert emails. The deliberate break, attribution stopped during a 100/s run
+  with a 30 s drain limit, failed the "nothing lost" and "drained" checks and exited 1; the
+  monitor emailed `[FIRING] arrivals_stopped`, then `[RESOLVED]` after the restart, and all 2,049
+  parked calls were then stored. The status page and inbox loaded through the forward.
+- **Demo path: a passing spike first exited 1.** The cleanup trap's `kill` of the already
+  stopped backlog printer failed, and bash used that as the script's status. The script now
+  ends with an explicit exit code; the break run then exited 1 and the next passing run 0.
+- **Demo path: the system under test runs the stub at load-test speed** (10 ms ±10%), so a demo
+  spike drains in about a minute; each run has its own CallSid prefix so it can be repeated.
+  The Session Manager plugin is unpacked into `~/.local` (no `sudo`), as the README shows.
+- **Demo path: a session costs a few cents.** `demo-up` took 90 s this time and the whole
+  verification about 15 minutes of instance time, roughly $0.06 at the price list's rates.
 
 ## Code-review outcomes
 
