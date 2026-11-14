@@ -54,6 +54,10 @@ jobs:
         # Offline, as above. The plan check's own tests run with the unit tests.
         run: ./infra/demo/check_test.sh
 
+      - name: Load test script tests
+        # Offline: the database password never goes on a command line.
+        run: ./loadtest/pg_test.sh
+
       - name: Install nats-server
         run: |
           file="nats-server-${NATS_SERVER_VERSION}-linux-amd64"
