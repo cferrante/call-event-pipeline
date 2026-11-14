@@ -1,6 +1,6 @@
 # Plan: milestone 3 (M3)
 
-Status: **agreed; in progress** · Spec: [design.md](design.md) · Previous: [M2 plan](plan-m2.md)
+Status: **done** · Spec: [design.md](design.md) · Previous: [M2 plan](plan-m2.md)
 
 M3 goal ([spec goals 5–7](design.md#1-goals)): show that the pipeline holds up when things go
 wrong, and measure it on server hardware. Done when:
@@ -303,6 +303,7 @@ deviations below and in [benchmarks](benchmarks.md).
 | 18: decision record | [#35](https://github.com/cferrante/call-event-pipeline/pull/35) | JetStream stays: at 1M–100M events a month every option handles the load and cost is nearly all fixed (Kinesis on demand ~$60–80, three NATS nodes $164, MSK $462+); JetStream wins on per-message retries, dead letters and deduplication in the broker and on $0 native tests. Our code is 0.1–0.5% of CPU, so no C++ |
 | 19: pitch | [#36](https://github.com/cferrante/call-event-pipeline/pull/36) | M3's results told for a non-technical reader on one page: no loss in a 1,000/s rush, 23 crashes with identical data, a hidden failure emailed in 5–7 s and fully restored, 98% accurate classification, $0.28 of server tests |
 | 20: demo runbook | [#37](https://github.com/cferrante/call-event-pipeline/pull/37) | A 10-minute AWS walkthrough (spike absorbed, silent failure emailed and replayed) with the expected result of each step; seven M3 terms in the concepts guide; README and `CLAUDE.md` show M3's state |
+| 21: code review | [#38](https://github.com/cferrante/call-event-pipeline/pull/38) | 10 findings checked against the code: 8 fixed test-first (the monitor now alerts when it can't read the pipeline; no email is lost to a slow upload, an oversized event or a token budget; the password is off command lines), 2 declined with reasons |
 
 ## Deviations from the plan
 
@@ -663,7 +664,7 @@ deviations below and in [benchmarks](benchmarks.md).
 Step 21 ran `/code-review` (medium) on all M3 changes (`a9c2160..c284aff`, about 10,000 lines
 of code): 10 findings, each checked against the code before acting. 8 fixed test-first, each
 test seen failing for the reported reason and each fix broken on purpose to prove the test
-catches it; 1 declined; 1 awaits a decision.
+catches it; 2 declined (one by your decision, as a known limitation).
 
 1. **Fixed: the monitor was silent while it couldn't take readings.** A failed reading was
    skipped before any rule ran, so with Postgres or NATS down nothing was emailed. Readings
@@ -705,7 +706,11 @@ catches it; 1 declined; 1 awaits a decision.
 10. **Declined: merge the three loopback-address checks** (`profiling`, `cmd/monitor`,
     `cmd/mailsink`). The reported drift isn't there: all three accept `localhost` and loopback
     IPs only, each has its own error message naming its variable, and each is tested.
-6. **Awaiting a decision: an email to several tracking addresses credits one campaign.**
+6. **Declined for M3 (decision: known limitation, M4 candidate): an email to several tracking
+   addresses credits one campaign**, and a reused `Message-ID` drops an email as a duplicate.
+   Both are rare and M3's goals are met without the fix, which changes the event's ID and the
+   schema contract. Recorded in
+   [known limitations](design.md#12-decisions-and-known-limitations).
 
 ## Results
 

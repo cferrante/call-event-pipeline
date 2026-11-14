@@ -545,6 +545,14 @@ Decisions and limitations added in M3:
   for a dedicated account with nothing else in it and instances that live under 3 hours. In
   production, use a dedicated VPC with private subnets and Systems Manager VPC endpoints (about
   $0.03/hour for three) or a NAT gateway (about $0.045/hour plus per-GB charges).
+- **An email to several tracking addresses credits one campaign.** The event takes the first
+  SMTP recipient, and `provider_id` is the bare `Message-ID`, so a second address in the same
+  delivery, or a separate delivery of the same message to another address, is dropped as a
+  duplicate. The sender chooses the `Message-ID`, so reusing another email's exact ID would
+  also drop that email. Both are rare: a lead seldom writes to two of a business's tracking
+  addresses at once, and the second needs another email's ID. The fix, an M4 candidate, is one
+  event per tracking address with `provider_id` = `Message-ID` plus that address, which
+  changes the schema contract (found in the M3 code review).
 - **The monitor is a single process.** If it dies, nothing alerts. In production it would run
   outside the system it watches, with its own heartbeat to an external service ("who watches
   the watchdog").
