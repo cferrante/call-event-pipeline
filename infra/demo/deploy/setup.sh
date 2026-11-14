@@ -20,6 +20,11 @@ MAILSINK_ADDR=127.0.0.1:8025
 SENDGRID_BASE_URL=http://127.0.0.1:8025
 ALERT_EMAIL_FROM=monitor@example.com
 ALERT_EMAIL_TO=oncall@example.com
+# The stub at the load tests' speed, 31 times faster than the calibrated real model, so a
+# demo spike drains in minutes (docs/benchmarks.md).
+MODEL_LATENCY=10ms
+MODEL_TIMEOUT=200ms
+MODEL_JITTER=0.1
 CONF
 
 systemctl daemon-reload
@@ -41,5 +46,17 @@ SQL
   systemctl restart $services
   sleep 3
   systemctl is-active $services
+  # The demo's campaigns, as the local spike test seeds them; once attribution has migrated.
+  for i in $(seq 30); do
+    runuser -u postgres -- psql -X -tAq -d leads -c "SELECT 1 FROM pg_tables WHERE tablename = 'tracking_numbers'" | grep -q 1 && break
+    sleep 1
+  done
+  runuser -u postgres -- psql -X -q -v ON_ERROR_STOP=1 -d leads <<'SQL'
+INSERT INTO tracking_numbers (phone_e164, campaign_id, source) VALUES
+  ('+18005550001', 'search-fall', 'google'),
+  ('+18005550002', 'morning-show', 'radio'),
+  ('+18005550003', 'spring-flyer', 'print')
+ON CONFLICT (phone_e164) DO NOTHING;
+SQL
 fi
 echo "$ROLE ready"

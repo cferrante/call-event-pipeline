@@ -16,8 +16,6 @@ set -a; source .env; set +a
 MODE=${MODE:-normal}
 RATE=${RATE:-1000} RAMP=${RAMP:-10s} HOLD=${HOLD:-60s} DUP_RATE=${DUP_RATE:-0.05}
 IDLE=${IDLE:-20s} IDLE_RATE=${IDLE_RATE:-20}
-# The load-test model profile: 20× faster than the service default (200ms, 2s) with the same
-# ratios, so ~400 messages/s fit through 4 workers and a run drains in minutes, not an hour.
 # The model runs 31 times faster than the calibrated real one (309 ms), so a spike drains in
 # minutes; what the test proves (flat model latency, no loss) does not depend on the scale.
 MODEL_LATENCY=${MODEL_LATENCY:-10ms} MODEL_TIMEOUT=${MODEL_TIMEOUT:-200ms} MODEL_CAPACITY=${MODEL_CAPACITY:-4} MODEL_JITTER=${MODEL_JITTER:-0.1}
