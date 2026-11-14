@@ -33,13 +33,16 @@ alerts_before=$(remote "$sut" "$ALERT_COUNT") || die "can't read the alert inbox
 # Control removes the limit for this run only: a runtime drop-in, gone on reboot and removed
 # at exit, so inference never stays overloaded by accident.
 control_conf=/run/systemd/system/cep@inference.service.d/control.conf
+# Every command here must not fail: under set -e, a failure in the EXIT trap becomes the
+# script's exit status, and a passing run would exit 1 (the sampler is usually gone already).
 cleanup() {
-  [[ -n ${sampler:-} ]] && kill "$sampler" 2>/dev/null
+  if [[ -n ${sampler:-} ]]; then kill "$sampler" 2>/dev/null || true; fi
   if [[ $MODE == control ]]; then
     remote "$sut" "rm -f $control_conf && systemctl daemon-reload && systemctl restart cep@inference" >/dev/null ||
       todo "could not restore inference's normal workers; run: make demo-up"
   fi
   rm -rf "$work"
+  return 0
 }
 trap cleanup EXIT
 if [[ $MODE == control ]]; then
@@ -48,7 +51,7 @@ if [[ $MODE == control ]]; then
     systemctl daemon-reload && systemctl restart cep@inference && sleep 2 && systemctl is-active cep@inference" >/dev/null ||
     die "could not restart inference in control mode"
 fi
-since=$(remote "$sut" "date +%s" | tr -d ' ')
+since=$(remote "$sut" "date +%s" | tr -d '[:space:]')
 
 if (( PROFILE )); then
   # Runs on the server by itself, so the profile starts on time whatever SSM's delays: 10 s into

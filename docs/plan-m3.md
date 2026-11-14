@@ -297,6 +297,7 @@ deviations below and in [benchmarks](benchmarks.md).
 | 14: demo environment | [#25](https://github.com/cferrante/call-event-pipeline/pull/25) | `make demo-up` builds both instances, ships the code and passes an end-to-end smoke test through Systems Manager in under 6 minutes; `demo-down` leaves nothing (46 s). A plan that opens an address range or drops the expiry guard is refused before apply, and the guard really terminates an instance (30 s from firing to `terminated`) |
 | 15: real model | [#27](https://github.com/cferrante/call-event-pipeline/pull/27) | A hosted model classifies the synthetic set at 98% against the stub rules' 54%, at p50 309 ms / p95 519 ms; the limiter keeps it free of 429s, which start between 30 and 40 calls a minute without it. The stub's default now reproduces the measured p50 and p95 within 5% ([#28](https://github.com/cferrante/call-event-pipeline/pull/28)) |
 | demo path (before 16) | [#29](https://github.com/cferrante/call-event-pipeline/pull/29) | On AWS, `make demo-spike` sent 1,000 webhooks/s: 37,799 accepted, stored and classified exactly once, edge p99 0.96 ms, drained in 69 s, no false alerts. Stopping attribution fails the run, fires and then resolves *arrivals stopped* by email, and loses nothing. `make demo-status` shows the status page and alert inbox through Session Manager |
+| 16: server benchmarks | [#30](https://github.com/cferrante/call-event-pipeline/pull/30), [#31](https://github.com/cferrante/call-event-pipeline/pull/31), #32 | On AWS: three 1,000/s spikes with no loss and flat model latency (edge p99 ≤ 1.05 ms, runs within 5%); control overloads the model 17×; the edge sustains at least 4,000/s; attribution drains ~620/s, limited by one transaction per message; our code is under 1% of either service's CPU; 23 kills leave the data identical; a silent failure is alerted in 5 s and fully replayed; `sync_interval: always` caps the edge at 300–500/s. $0.28 |
 
 ## Deviations from the plan
 
@@ -598,10 +599,43 @@ deviations below and in [benchmarks](benchmarks.md).
 - **Step 16: the default sync interval is verified,** not assumed: `nats-server` 2.15.1 reports
   `sync_interval` 120 s in `/varz` by default, and `sync_always: true` with `always`.
 
+- **Step 16: run on 2026-11-14,** 74 minutes of instance time (about $0.28). Results in
+  [server benchmarks](benchmarks.md#server-benchmarks-m3).
+- **Step 16: a passing spike exited 1 again.** The new trap's `[[ … ]] && kill` failed with the
+  sampler already gone, and under `set -e` that set the exit status; the local checks never ran
+  the trap that way. Fixed (every trap command tolerates failure); the next two runs exited 0.
+- **Step 16: the first drill passed a check it hadn't measured.** Run Command's output ends in a
+  tab (the empty error stream), and `fault.sh` stripped only spaces, so the first poll for the
+  alert returned a lone tab, counted as "received": detection was never timed, and two row
+  comparisons failed on `7649<tab>`. The fake `remote` used locally didn't add the tab. Fixed by
+  stripping all whitespace; the re-run timed detection at 5.0 s and passed all five checks.
+- **Step 16: the step-up's upper steps measure k6.** From 5,000/s the 2-vCPU load generator
+  dropped iterations; starting 1,500 virtual users up front (`PREALLOC`, added in the session)
+  removed the drops but raised p99, with the server at most 50% busy. Recorded as "at least
+  4,000/s". The 80% CPU guard averages both cores, so it didn't trip. A bigger load generator
+  is a decision for the owner.
+- **Step 16: `acked_not_written` gives false alerts under heavy retries.** Four in the control
+  run: the rule reads acknowledgements from the ack floor, which stalls behind a retried message
+  and then jumps. Normal spikes had none, so the plan's criterion holds; whether to fix the rule
+  before the postmortem is a decision for the owner.
+- **Step 16: `sync_interval: always` was measured at three rates,** not one: at 1,000/s it fails
+  84% of requests, so 300/s and 500/s were added to find where it holds.
+- **Step 16: one spike's peak attribution lag was lost** to a filter on the output; that cell
+  says so rather than guess.
+
 ## Code-review outcomes
 
 None yet.
 
 ## Results
 
-To be filled in from [benchmarks](benchmarks.md) as steps 12, 15 and 16 complete.
+Measured on AWS (c7g.xlarge, k6 on c7g.large) on 2026-11-14; detail and method in
+[server benchmarks](benchmarks.md#server-benchmarks-m3).
+
+| Done-when criterion | Result |
+|---|---|
+| Silent failure detected within 60 s, recovered by replay with zero loss | 5.0 s; 625 lost, all restored; a second replay changed nothing |
+| Repeated `kill -9` under load leaves the data identical to a clean run | 23 kills; checksum `607d7f28…`, identical to the clean run (and to the laptop's) |
+| Contract tests catch a breaking change | Step 2 ([#10](https://github.com/cferrante/call-event-pipeline/pull/10)) |
+| Spike, step-up, crash and monitor measured on AWS | Spike ✓ (×3, plus control), step-up ≥ 4,000/s, crash ✓, monitor ✓ with 0 false alerts in normal spikes |
+| Decision record and pitch | Steps 18 and 19 |
