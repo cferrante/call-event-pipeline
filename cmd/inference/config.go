@@ -19,7 +19,7 @@ type config struct {
 	// workers is INFERENCE_WORKERS: messages handled at once, and the consumer's MaxAckPending.
 	// It defaults to the model's capacity, so the model is never sent more than it can serve.
 	workers int
-	model   inference.StubConfig // MODEL_CAPACITY, MODEL_LATENCY, MODEL_TIMEOUT
+	model   inference.StubConfig // MODEL_CAPACITY, MODEL_LATENCY, MODEL_TIMEOUT, MODEL_JITTER
 
 	modelKind     string               // MODEL: stub (default) or groq
 	groq          inference.GroqConfig // GROQ_*; used when modelKind is groq
@@ -44,6 +44,13 @@ func loadConfig() (config, error) {
 	}
 	if cfg.model.Timeout, err = positiveDuration("MODEL_TIMEOUT", cfg.model.Timeout); err != nil {
 		return config{}, err
+	}
+	if raw := os.Getenv("MODEL_JITTER"); raw != "" {
+		j, err := strconv.ParseFloat(raw, 64)
+		if err != nil || j < 0 || j >= 1 {
+			return config{}, fmt.Errorf("MODEL_JITTER must be a fraction from 0 to below 1, like 0.1, got %q", raw)
+		}
+		cfg.model.Jitter = j
 	}
 	switch cfg.modelKind = getenv("MODEL", "stub"); cfg.modelKind {
 	case "stub":
@@ -129,6 +136,7 @@ func (c config) LogValue() slog.Value {
 		slog.Int("model_capacity", c.model.Capacity),
 		slog.Duration("model_latency", c.model.BaseLatency),
 		slog.Duration("model_timeout", c.model.Timeout),
+		slog.Float64("model_jitter", c.model.Jitter),
 		slog.String("model", c.modelKind),
 		slog.String("groq_model", c.groq.Model),
 		slog.Int("groq_tokens_per_minute", c.groqPerMinute),

@@ -43,8 +43,13 @@ type StubConfig struct {
 	Jitter      float64       // random variation, e.g. 0.1 for ±10%
 }
 
-// DefaultStubConfig is the M2 starting point: 4 concurrent calls at 200 ms ± 10%.
-var DefaultStubConfig = StubConfig{Capacity: 4, BaseLatency: 200 * time.Millisecond, Timeout: 2 * time.Second, Jitter: 0.1}
+// DefaultStubConfig is calibrated from a real model (gpt-oss-20b on Groq, measured at a low
+// rate; docs/benchmarks.md): p50 309 ms and p95 519 ms, which a ±75% spread around 309 ms
+// reproduces. The fastest calls come out quicker than measured (77 ms against 107 ms) and the
+// slowest slower than the measured p99's long tail allows for; the middle matches. Capacity
+// stays 4: a hosted model's real limit is tokens a minute, which the Groq adapter's limiter
+// enforces instead.
+var DefaultStubConfig = StubConfig{Capacity: 4, BaseLatency: 309 * time.Millisecond, Timeout: 2 * time.Second, Jitter: 0.75}
 
 // Stub is a fake model with a fixed capacity. A call that starts while k calls are in flight
 // (itself included) takes BaseLatency × max(1, k/Capacity): beyond capacity, calls share the

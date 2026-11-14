@@ -226,3 +226,24 @@ func TestRealSleep(t *testing.T) {
 		t.Fatal("cancelled call still running after 1s: the context was ignored")
 	}
 }
+
+// The default profile is calibrated from gpt-oss-20b on Groq (docs/benchmarks.md, model
+// calibration): one call at a time, its latency should have the measured p50 (309 ms) and p95
+// (519 ms), each within 5%.
+func TestDefaultProfileMatchesCalibration(t *testing.T) {
+	s := NewStub(DefaultStubConfig)
+	var ds []time.Duration
+	for i := 0; i < 20000; i++ {
+		ds = append(ds, s.latency(1))
+	}
+	slices.Sort(ds)
+	for _, tt := range []struct {
+		name string
+		got  time.Duration
+		want time.Duration
+	}{{"p50", ds[len(ds)/2], 309 * time.Millisecond}, {"p95", ds[len(ds)*95/100], 519 * time.Millisecond}} {
+		if diff := float64(tt.got-tt.want) / float64(tt.want); diff < -0.05 || diff > 0.05 {
+			t.Errorf("%s = %s, want %s ± 5%%", tt.name, tt.got.Round(time.Millisecond), tt.want)
+		}
+	}
+}
