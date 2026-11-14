@@ -299,7 +299,8 @@ deviations below and in [benchmarks](benchmarks.md).
 | demo path (before 16) | [#29](https://github.com/cferrante/call-event-pipeline/pull/29) | On AWS, `make demo-spike` sent 1,000 webhooks/s: 37,799 accepted, stored and classified exactly once, edge p99 0.96 ms, drained in 69 s, no false alerts. Stopping attribution fails the run, fires and then resolves *arrivals stopped* by email, and loses nothing. `make demo-status` shows the status page and alert inbox through Session Manager |
 | 16: server benchmarks | [#30](https://github.com/cferrante/call-event-pipeline/pull/30), [#31](https://github.com/cferrante/call-event-pipeline/pull/31), #32 | On AWS: three 1,000/s spikes with no loss and flat model latency (edge p99 ≤ 1.05 ms, runs within 5%); control overloads the model 17×; the edge sustains at least 4,000/s; attribution drains ~620/s, limited by one transaction per message; our code is under 1% of either service's CPU; 23 kills leave the data identical; a silent failure is alerted in 5 s and fully replayed; `sync_interval: always` caps the edge at 300–500/s. $0.28 |
 | (fix) | [#33](https://github.com/cferrante/call-event-pipeline/pull/33) | `acked_not_written` no longer fires under heavy retries: the monitor counts acknowledgements without the ack floor; a repeated control run on AWS raised only the correct `stale_backlog` |
-| 17: postmortem | #34 | A silent write failure on the server was detected in 6.5 s and all 621 lost calls replayed; the write-up names a misleading second alert and "resolved isn't recovered" as follow-ups |
+| 17: postmortem | [#34](https://github.com/cferrante/call-event-pipeline/pull/34) | A silent write failure on the server was detected in 6.5 s and all 621 lost calls replayed; the write-up names a misleading second alert and "resolved isn't recovered" as follow-ups |
+| 18: decision record | #35 | JetStream stays: at 1M–100M events a month every option handles the load and cost is nearly all fixed (Kinesis on demand ~$60–80, three NATS nodes $164, MSK $462+); JetStream wins on per-message retries, dead letters and deduplication in the broker and on $0 native tests. Our code is 0.1–0.5% of CPU, so no C++ |
 
 ## Deviations from the plan
 
@@ -638,6 +639,13 @@ deviations below and in [benchmarks](benchmarks.md).
   checks (detected in 6.5 s, 621 lost, all replayed), and its journal and alert emails are the
   postmortem's timeline. The journal showed a second alert the drill script doesn't check,
   `arrivals_stopped`, because the canaries were lost too; the postmortem records it.
+
+- **Step 18: prices from the Price List API, not pricing pages.** Read on 2026-11-14 for
+  us-east-1 on demand (`AmazonMSK`, `AmazonKinesis`, `AmazonEC2`), the same method as
+  `prices.sh`; facts that aren't prices (Kinesis limits, share groups on MSK, licences) are
+  sourced from documentation pages. The record finds Kinesis on demand cheaper than a
+  three-node JetStream cluster at this load and says so; the decision rests on delivery
+  semantics and testing, not price.
 
 ## Code-review outcomes
 
