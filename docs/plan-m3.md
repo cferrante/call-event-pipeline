@@ -623,6 +623,14 @@ deviations below and in [benchmarks](benchmarks.md).
 - **Step 16: one spike's peak attribution lag was lost** to a filter on the output; that cell
   says so rather than guess.
 
+- **Decided (1A, 2A): fix the false alerts; accept "at least 4,000/s".** The monitor now counts
+  a consumer's acknowledgements as its delivered position less the messages still awaiting an
+  ack, instead of its ack floor. Test first: five messages delivered, four acknowledged and the
+  first left in progress; the floor reported 0 acknowledged, the fix 4. Deliberate break:
+  without subtracting the messages awaiting an ack it reports 5, and the test fails. The
+  step 10 drill's end-to-end test still detects the fault. Confirmed on AWS with the step 17
+  session's control run.
+
 ## Code-review outcomes
 
 None yet.
