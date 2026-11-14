@@ -16,6 +16,9 @@ const IDLE = __ENV.IDLE || '0s'; // a gentle period before the spike, as a basel
 const IDLE_RATE = Number(__ENV.IDLE_RATE || 0);
 const DUP_RATE = Number(__ENV.DUP_RATE || 0.05);
 const SUMMARY_FILE = __ENV.SUMMARY_FILE || 'summary.env';
+// CallSid prefix. The demo sets one per run, so a second run sends new calls instead of
+// duplicates of the first (which deduplication would rightly drop).
+const PREFIX = __ENV.PREFIX || 'CAk6';
 
 // Arrival rate, not a fixed number of virtual users: requests keep coming at RATE per second
 // however slow the server gets, as real webhook traffic does (no coordinated omission).
@@ -69,7 +72,7 @@ function post(body, req, id) {
 export default function () {
   const i = exec.scenario.iterationInTest;
   const params = {
-    CallSid: 'CAk6' + String(i).padStart(10, '0'),
+    CallSid: PREFIX + String(i).padStart(10, '0'),
     From: '+1415' + String(i % CALLERS).padStart(7, '0'),
     To: TRACKING_NUMBERS[i % TRACKING_NUMBERS.length],
   };

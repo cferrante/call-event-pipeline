@@ -7,6 +7,8 @@ ensure_login
 
 NATS_VERSION=v2.15.1
 NATS_SHA256=e2fbab4cad7d3c76e3052eb959570393c9d73ba756b70bf8e9eea61e9ae6d49c # linux-arm64
+K6_VERSION=v2.3.0 # the version used locally
+K6_SHA256=5ca3433e8201da72a284aaa241a1bb5fb47f4abb4e384d39410ddd8062f49b90 # linux-arm64
 build="$demo/.build"
 started=$EPOCHREALTIME
 
@@ -34,7 +36,15 @@ fi
 echo "$NATS_SHA256  $build/cache/$nats.tar.gz" | sha256sum -c --quiet - || die "nats-server checksum mismatch"
 tar -xzf "$build/cache/$nats.tar.gz" -C "$build/cache" "$nats/nats-server"
 cp "$build/cache/$nats/nats-server" "$build/release/bin/"
+k6="k6-$K6_VERSION-linux-arm64"
+if [[ ! -f $build/cache/$k6.tar.gz ]]; then
+  curl -fsSL -o "$build/cache/$k6.tar.gz" "https://github.com/grafana/k6/releases/download/$K6_VERSION/$k6.tar.gz"
+fi
+echo "$K6_SHA256  $build/cache/$k6.tar.gz" | sha256sum -c --quiet - || die "k6 checksum mismatch"
+tar -xzf "$build/cache/$k6.tar.gz" -C "$build/cache" "$k6/k6"
+cp "$build/cache/$k6/k6" "$build/release/bin/"
 cp -r "$demo/deploy/." "$build/release/"
+cp "$root/loadtest/spike.js" "$build/release/"
 tar -czf "$build/release.tar.gz" -C "$build/release" .
 aws s3 cp --only-show-errors "$build/release.tar.gz" "s3://$bucket/release.tar.gz"
 ok "release uploaded ($(du -h "$build/release.tar.gz" | cut -f1))"

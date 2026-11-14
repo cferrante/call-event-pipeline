@@ -11,7 +11,7 @@ Your machine ──(AWS API: tofu, s3 cp, ssm send-command)──► AWS
   default VPC, one availability zone                      ▼
   ┌──────────────────────────────┐  :8081 only   ┌──────────────────────────────────┐
   │ load generator (c7g.large)   │ ────────────► │ system under test (c7g.xlarge)    │
-  │ sendhook (k6 from step 16)   │               │ nats-server, Postgres, ingest,    │
+  │ k6, sendhook                 │               │ nats-server, Postgres, ingest,    │
   │ no inbound                   │               │ attribution, inference, monitor,  │
   └──────────────────────────────┘               │ mailsink, under systemd           │
                                                  └──────────────────────────────────┘
@@ -30,6 +30,8 @@ a signed-in profile: `aws sso login --profile <PROJECT_PROFILE>`.
 | Command | Does | Cost |
 |---|---|---|
 | `make demo-up` | Plans, **checks the plan** (below), applies, builds the binaries for `linux/arm64`, ships them through the S3 bucket, generates the demo's secrets into SSM, installs, then runs the smoke test. Re-running ships a new release to the same instances | about $0.23/hour while up ($0.70 for a full 3-hour session) |
+| `make demo-spike` | A webhook spike from the load generator (default 1,000/s for 30 s, after a 10 s idle period), printing the backlog as it rises and drains, then checking every accepted webhook was stored and classified exactly once. Each run has its own CallSid prefix, so it can be repeated. `RATE=200 HOLD=10s make demo-spike` for a smaller one | $0 beyond the session |
+| `make demo-status` | Forwards the monitor's status page to <http://localhost:18090> and the alert inbox to <http://localhost:18025/messages> through Session Manager; Ctrl-C stops. Needs the Session Manager plugin (below) | $0 |
 | `make demo-smoke` | `/healthz` and every service on the system under test; a signed SMS webhook from the load generator, found in Postgres; the expiry timer on both | $0 |
 | `make demo-down` | `tofu destroy`, deletes the demo's secrets, then `check.sh` | $0 |
 | `make demo-check` | Read-only: lists anything left over; exits 1 if there is any | $0 |
@@ -37,6 +39,21 @@ a signed-in profile: `aws sso login --profile <PROJECT_PROFILE>`.
 
 `EXPIRY_MINUTES=N make demo-up` shortens the self-termination (5 to 180 minutes); it can't
 lengthen it.
+
+The system under test runs the stub model at the load tests' speed (10 ms), 31 times faster
+than the calibrated real model, so a spike drains in a few minutes
+([benchmarks](../../docs/benchmarks.md#model-calibration-m3)).
+
+**Session Manager plugin** (for `demo-status`; 4 MB, no `sudo`), unpacked into `~/.local`:
+
+```bash
+mkdir -p /tmp/ssm-plugin && cd /tmp/ssm-plugin
+curl -fsSLO https://s3.amazonaws.com/session-manager-downloads/plugin/latest/ubuntu_64bit/session-manager-plugin.deb
+mkdir -p ~/.local/opt/session-manager-plugin
+dpkg-deb -x session-manager-plugin.deb ~/.local/opt/session-manager-plugin
+ln -sf ~/.local/opt/session-manager-plugin/usr/local/sessionmanagerplugin/bin/session-manager-plugin ~/.local/bin/
+session-manager-plugin --version
+```
 
 ## The guards
 
@@ -57,8 +74,8 @@ lengthen it.
 | Path | What |
 |---|---|
 | `*.tf`, `cloud-init.yaml.tftpl` | The environment. State is local and git-ignored |
-| `deploy/` | What ships to the instances: `setup.sh`, `fetch-secrets.sh` and the systemd units (`cep@.service` runs any of the services) |
-| `up.sh`, `smoke.sh`, `down.sh`, `check.sh` | The `make` targets; helpers in `lib.sh` |
+| `deploy/` | What ships to the instances: `setup.sh`, `fetch-secrets.sh`, the systemd units (`cep@.service` runs any of the services), and `stats.sh` / `drain.sh`, which the demo scripts run on the system under test |
+| `up.sh`, `smoke.sh`, `spike.sh`, `status.sh`, `down.sh`, `check.sh` | The `make` targets; helpers in `lib.sh` |
 
 ## On the instances
 
