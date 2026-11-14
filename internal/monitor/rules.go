@@ -40,7 +40,7 @@ type ConsumerSample struct {
 
 // Config holds the rules' thresholds.
 type Config struct {
-	// Arrivals stopped: no canary stored for this long.
+	// Arrivals stopped: no canary stored for this long; 0 when the canary is off.
 	CanaryMaxAge time.Duration
 	// Volume drop: the recent rate is below DropRatio of the baseline, the median per-minute
 	// rate over the Baseline before it, provided that baseline is at least MinRate per second.
@@ -93,6 +93,9 @@ func Evaluate(cfg Config, history []Sample) []Finding {
 // synthetic webhook sent every 10 s, so its absence means the path from the provider to the
 // database is broken somewhere, even when real traffic is naturally quiet.
 func arrivalsStopped(cfg Config, h []Sample) []Finding {
+	if cfg.CanaryMaxAge == 0 {
+		return nil // no canary is being sent, so its absence means nothing
+	}
 	now := h[len(h)-1]
 	last := now.CanarySeen
 	if last.Before(h[0].At) {

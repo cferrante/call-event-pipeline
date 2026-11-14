@@ -77,6 +77,39 @@ func TestConfigRejectsBadValues(t *testing.T) {
 	}
 }
 
+// arrivals_stopped waits CANARY_MAX_AGE for a canary sent every CANARY_INTERVAL. Turning the
+// canary off turns the rule off; a max age under two intervals would flap between canaries.
+func TestCanarySettingsAgree(t *testing.T) {
+	env := func(kv ...string) map[string]string {
+		m := map[string]string{}
+		for k, v := range baseEnv {
+			m[k] = v
+		}
+		for i := 0; i < len(kv); i += 2 {
+			m[kv[i]] = kv[i+1]
+		}
+		return m
+	}
+	setEnv(t, env("CANARY_INTERVAL", "0"))
+	cfg, err := loadConfig()
+	if err != nil {
+		t.Fatalf("canary off: %v", err)
+	}
+	if cfg.rules.CanaryMaxAge != 0 {
+		t.Errorf("canary off, but arrivals_stopped still waits %v for it", cfg.rules.CanaryMaxAge)
+	}
+	for _, kv := range [][]string{{"CANARY_INTERVAL", "60s"}, {"CANARY_INTERVAL", "20s", "CANARY_MAX_AGE", "39s"}} {
+		setEnv(t, env(kv...))
+		if _, err := loadConfig(); err == nil {
+			t.Errorf("%v accepted: the alert would flap between canaries", kv)
+		}
+	}
+	setEnv(t, env("CANARY_INTERVAL", "20s", "CANARY_MAX_AGE", "40s"))
+	if _, err := loadConfig(); err != nil {
+		t.Errorf("max age of two intervals refused: %v", err)
+	}
+}
+
 // Alert emails are off unless a recipient is set; once one is, every setting the send needs
 // must be there too, and there is no default base URL, so a development machine can't email
 // through real SendGrid by accident.

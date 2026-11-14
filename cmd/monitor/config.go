@@ -63,6 +63,13 @@ func loadConfig() (config, error) {
 	if cfg.canaryInterval > 0 && (cfg.authToken == "" || cfg.publicURL == "") {
 		return config{}, fmt.Errorf("the canary needs TWILIO_AUTH_TOKEN and INGEST_PUBLIC_URL (or CANARY_INTERVAL=0 to turn it off)")
 	}
+	switch {
+	case cfg.canaryInterval == 0:
+		cfg.rules.CanaryMaxAge = 0 // no canary: arrivals_stopped is off
+	case cfg.rules.CanaryMaxAge < 2*cfg.canaryInterval:
+		return config{}, fmt.Errorf("CANARY_MAX_AGE (%v) must be at least twice CANARY_INTERVAL (%v), or arrivals_stopped flaps between canaries",
+			cfg.rules.CanaryMaxAge, cfg.canaryInterval)
+	}
 	return cfg, nil
 }
 
