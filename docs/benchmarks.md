@@ -48,6 +48,7 @@ duplicates).
 | 2026-11-14 | `693c618`+fix | normal, 4 workers, AWS | 11.15 / 11.57 ms | < 0.1 s / 126 s | ~44197 | 133s | 67799 (all) | 0 | 0 |
 | 2026-11-14 | `693c618`+fix | normal, 4 workers, AWS | 11.15 / 11.58 ms | < 0.1 s / 126 s | ~44164 | 135s | 67799 (all) | 0 | 0 |
 | 2026-11-14 | `693c618`+fix | control, 200 workers, AWS | 11.15 / 190.25 ms | < 0.1 s / 325 s | ~48960 | 374s | 67798 (1 dead-lettered) | 32686 | 1 |
+| 2026-11-14 | `a661595` | control, 200 workers, AWS | 11.15 / 190.21 ms | < 0.1 s / 331 s | ~48282 | 383s | 67721 (78 dead-lettered) | 35133 | 78 |
 
 Rows come from the same runs as the table above (`run.sh` prints both). **Mode** is `normal`
 (workers = model capacity) or `control` (the limit removed). The load-test model profile is
@@ -208,7 +209,10 @@ wrong: only one message was dead-lettered. The rule counts acknowledgements as t
 the consumer's ack floor, the oldest unacknowledged message. A message stuck in timeout retries
 holds the floor while later ones are written; when it clears, the floor jumps past thousands in
 one window and they look unwritten. Any heavy retrying could do the same, a hosted model's `429`
-retries included.
+retries included. **Fixed in [#33](https://github.com/cferrante/call-event-pipeline/pull/33)**, which counts
+the delivered position less the messages awaiting an ack; the control run repeated at `a661595`
+emailed only `stale_backlog`, which fired and resolved. Its 78 dead letters, against 1 before,
+show how much an overloaded run varies.
 
 **`sync_interval: always`.** NATS reported `sync_always: true` (default: `sync_interval` 120 s).
 Each webhook then waits for its write to reach the disk:

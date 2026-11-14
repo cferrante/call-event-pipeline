@@ -630,6 +630,12 @@ deviations below and in [benchmarks](benchmarks.md).
   without subtracting the messages awaiting an ack it reports 5, and the test fails. The
   step 10 drill's end-to-end test still detects the fault. Confirmed on AWS with the step 17
   session's control run.
+- **Step 17: the incident ran in its own short session** (15 minutes, about $0.06), because
+  step 16's instance logs were gone. It first repeated the control run on the fixed monitor:
+  no `acked_not_written`, only the correct `stale_backlog`. The drill then passed all five
+  checks (detected in 6.5 s, 621 lost, all replayed), and its journal and alert emails are the
+  postmortem's timeline. The journal showed a second alert the drill script doesn't check,
+  `arrivals_stopped`, because the canaries were lost too; the postmortem records it.
 
 ## Code-review outcomes
 
