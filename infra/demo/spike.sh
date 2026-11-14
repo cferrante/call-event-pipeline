@@ -51,7 +51,7 @@ if [[ $MODE == control ]]; then
     systemctl daemon-reload && systemctl restart cep@inference && sleep 2 && systemctl is-active cep@inference" >/dev/null ||
     die "could not restart inference in control mode"
 fi
-since=$(remote "$sut" "date +%s" | tr -d ' ')
+since=$(remote "$sut" "date +%s" | tr -d '[:space:]')
 
 if (( PROFILE )); then
   # Runs on the server by itself, so the profile starts on time whatever SSM's delays: 10 s into

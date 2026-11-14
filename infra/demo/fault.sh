@@ -20,7 +20,7 @@ import json, sys, datetime
 for m in json.load(sys.stdin) or []:
     t = datetime.datetime.fromisoformat(m[\"Received\"].replace(\"Z\", \"+00:00\")).timestamp()
     if \"[$2]\" in m[\"Subject\"] and \"$1\" in m[\"Subject\"] and t >= $3:
-        print(\"%.1f\" % (t - $3)); break'" | tr -d ' '
+        print(\"%.1f\" % (t - $3)); break'" | tr -d '[:space:]'
 }
 fault_conf=/run/systemd/system/cep@attribution.service.d/fault.conf
 restore() {
@@ -67,15 +67,15 @@ accepted=$(value UNIQUE_ACCEPTED "$k6out")
 
 count="runuser -u postgres -- psql -X -tAq -d leads -c \"SELECT count(*) FROM interactions WHERE provider_id LIKE '$prefix%'\""
 remote "$sut" "for i in \$(seq 60); do set -- \$(/opt/cep/stats.sh); [ \$1\$2 = 00 ] && break; sleep 2; done" >/dev/null
-lost=$(( accepted - $(remote "$sut" "$count" | tr -d ' ') ))
+lost=$(( accepted - $(remote "$sut" "$count" | tr -d '[:space:]') ))
 
 act "replaying from $replay_from"
 replay="set -a; . /etc/cep/config.env; . /run/cep/env; set +a; s=\$(date +%s.%N)
   /opt/cep/bin/attribution -replay-from $replay_from 2>&1 | grep 'replay finished'; echo TOOK=\$(awk -v a=\$s -v b=\$(date +%s.%N) 'BEGIN { printf \"%.1f\", b - a }')"
 first=$(remote "$sut" "$replay") || die "replay failed:"$'\n'"$first"
-after=$(remote "$sut" "$count" | tr -d ' ')
+after=$(remote "$sut" "$count" | tr -d '[:space:]')
 second=$(remote "$sut" "$replay") || die "second replay failed"
-after2=$(remote "$sut" "$count" | tr -d ' ')
+after2=$(remote "$sut" "$count" | tr -d '[:space:]')
 
 restore; trap - EXIT
 act "normal attribution restored; waiting for [RESOLVED]"
