@@ -12,6 +12,7 @@ import (
 	"strings"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 )
 
 // GroqConfig sets up the Groq adapter. The API key comes from the environment, which is filled
@@ -50,6 +51,10 @@ func (g *Groq) RateLimited() int64 { return g.rateLimited.Load() }
 // NoTextVersion is the model version stored for an interaction with no text to classify.
 const NoTextVersion = "no-text"
 
+// maxModelTextBytes caps the message text sent to the model: about 2,700 tokens, plenty for
+// what a message wants, which it says at the start. An email's text is kept up to 64 KB.
+const maxModelTextBytes = 8000
+
 const groqSystemPrompt = `You classify messages that people send to a business after seeing its marketing.
 Answer with JSON only: {"intent": "sales" | "support" | "unknown", "score": <confidence from 0 to 1>}.
 sales: wants to buy or book, or asks about prices, quotes, availability or options.
@@ -73,7 +78,7 @@ func (g *Groq) Classify(ctx context.Context, in Input) (Result, error) {
 		// A call (no text yet) or the monitor's canary: nothing to classify, so no tokens spent.
 		return Result{Intent: "unknown", Score: 1, ModelVersion: NoTextVersion}, nil
 	}
-	user := fmt.Sprintf("Channel: %s\nMessage:\n%s", in.Channel, Redact(text))
+	user := fmt.Sprintf("Channel: %s\nMessage:\n%s", in.Channel, g.fit(Redact(text)))
 	req := map[string]any{
 		"model": g.cfg.Model,
 		"messages": []map[string]string{
@@ -131,6 +136,25 @@ func (g *Groq) Classify(ctx context.Context, in Input) (Result, error) {
 		g.tokensUsed.Add(int64(resp.Usage.TotalTokens))
 		return g.result(resp.Choices[0].Message.Content)
 	}
+}
+
+// fit cuts text to maxModelTextBytes, and further if need be so that a call's estimate (see
+// Classify) fits the limiter's budget a minute; a call that could never fit would only be
+// retried until it was dead-lettered. The cut falls between characters.
+func (g *Groq) fit(text string) string {
+	limit := maxModelTextBytes
+	if g.lim != nil {
+		const header = 64 // "Channel: …\nMessage:\n", with room to spare
+		limit = min(limit, (g.lim.perMinute-100-g.cfg.MaxCompletionTokens)*3-len(groqSystemPrompt)-header)
+	}
+	if len(text) <= limit {
+		return text
+	}
+	limit = max(limit, 0)
+	for limit > 0 && !utf8.RuneStart(text[limit]) {
+		limit--
+	}
+	return text[:limit]
 }
 
 func (g *Groq) post(ctx context.Context, body []byte) (int, http.Header, []byte, error) {

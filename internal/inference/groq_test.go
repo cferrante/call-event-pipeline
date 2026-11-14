@@ -11,6 +11,7 @@ import (
 	"sync"
 	"testing"
 	"time"
+	"unicode/utf8"
 
 	"github.com/cferrante/call-event-pipeline/internal/envelope"
 )
@@ -290,5 +291,42 @@ func TestGroqSkipsTheModelWithoutText(t *testing.T) {
 	}
 	if len(f.requests) != 0 || lim.UsedToday() != 0 {
 		t.Errorf("%d requests sent and %d tokens charged for messages with no text", len(f.requests), lim.UsedToday())
+	}
+}
+
+// An email's text is kept up to 64 KB, more than a minute's token budget. A message that
+// could never fit would be retried until it was dead-lettered, unclassified; instead only its
+// start is sent, which is where an email says what it wants.
+func TestGroqSendsOnlyTheStartOfALongMessage(t *testing.T) {
+	f := &fakeGroq{t: t, clock: newVirtualClock(), tokensPerCall: 200}
+	lim := NewLimiter(7200, 100_000)
+	g := newTestGroq(t, f, lim)
+	body := "Can I get a quote for a new roof? " + strings.Repeat("Some more detail about the house. ", 2000) + "THE END"
+	if _, err := g.Classify(context.Background(), Input{Channel: envelope.Email, Body: body}); err != nil {
+		t.Fatalf("a %d KB message: %v", len(body)>>10, err)
+	}
+	text := userText(f.requests[0])
+	if !strings.Contains(text, "Can I get a quote") || strings.Contains(text, "THE END") {
+		t.Errorf("sent %d bytes; want the start of the message only", len(text))
+	}
+	if len(text) > maxModelTextBytes+100 {
+		t.Errorf("sent %d bytes, want at most about %d", len(text), maxModelTextBytes)
+	}
+
+	// A smaller budget a minute shrinks what is sent, so the call still fits it.
+	f2 := &fakeGroq{t: t, clock: newVirtualClock(), tokensPerCall: 200}
+	g2 := newTestGroq(t, f2, NewLimiter(1500, 100_000))
+	if _, err := g2.Classify(context.Background(), Input{Channel: envelope.Email, Body: body}); err != nil {
+		t.Fatalf("with 1,500 tokens a minute: %v", err)
+	}
+
+	// The cut falls between characters, never inside one.
+	f3 := &fakeGroq{t: t, clock: newVirtualClock(), tokensPerCall: 200}
+	if _, err := newTestGroq(t, f3, nil).Classify(context.Background(),
+		Input{Channel: envelope.Email, Body: "x" + strings.Repeat("é", maxModelTextBytes)}); err != nil {
+		t.Fatal(err)
+	}
+	if text := userText(f3.requests[0]); strings.ContainsRune(text, utf8.RuneError) {
+		t.Errorf("the cut split a character: ...%q", text[len(text)-8:])
 	}
 }
