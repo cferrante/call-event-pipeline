@@ -18,10 +18,17 @@ Numbers are only comparable between rows with the same machine.
 | 2026-10-28 | `b0c2515` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s; + inference (normal) | 0.67 / 3.04 ms | 0.000% | 40749 | 142s | ✓ 67999 | 0 |
 | 2026-10-28 | `b0c2515` | 8 CPU, Ubuntu WSL2 | 1000/s, ramp 10s, hold 60s; + inference (control) | 0.71 / 3.17 ms | 0.000% | 41671 | 682s | ✓ 67999 | 0 |
 | 2026-11-14 | `597128a`+fix | AWS c7g.xlarge (k6 on c7g.large) | 1000/s, ramp 10s, hold 30s; + inference (demo spike) | 0.45 / 0.96 ms | 0.000% | ~14600 | 69s | ✓ 37799 | 0 |
+| 2026-11-14 | `693c618` | AWS c7g.xlarge (k6 on c7g.large) | 1000/s, ramp 10s, hold 60s; + inference (normal) | 0.47 / 1.05 ms | 0.000% | ~33177 | 131s | ✓ 67799 | 0 |
+| 2026-11-14 | `693c618`+fix | AWS c7g.xlarge (k6 on c7g.large) | 1000/s, ramp 10s, hold 60s; + inference (normal) | 0.47 / 0.99 ms | 0.000% | ~30511 | 133s | ✓ 67799 | 0 |
+| 2026-11-14 | `693c618`+fix | AWS c7g.xlarge (k6 on c7g.large) | 1000/s, ramp 10s, hold 60s; + inference (normal) | 0.46 / 0.96 ms | 0.000% | not recorded | 135s | ✓ 67799 | 0 |
+| 2026-11-14 | `693c618`+fix | AWS c7g.xlarge (k6 on c7g.large) | 1000/s, ramp 10s, hold 60s; + inference (control) | 0.46 / 0.98 ms | 0.000% | ~30700 | 374s | ✓ 67799 | 1 |
 
-The AWS row is `make demo-spike` (a 30 s hold, so not directly comparable with the 60 s rows);
-its peak lag is sampled every few seconds, so approximate, and "drained" covers both consumers.
-Step 16 repeats the standard 60 s spike on the same machines.
+The AWS rows are `make demo-spike` (`MODE=control` for the control row); the first is the demo
+path's 30 s hold, the rest the standard 60 s. Their peak lag is sampled every few seconds, so
+approximate (one run's was lost to a filter on the output), and "drained" covers both consumers.
+`+fix` is the exit-status fix to `spike.sh`, which changes nothing the run measures. **The three
+normal runs agree within 5%** (edge p99 0.96–1.05 ms, drained 131–135 s), unlike the laptop's
+20–25%; the server is a steadier place to compare changes. See [server benchmarks](#server-benchmarks-m3).
 
 Columns: **Load** is peak rate, ramp and hold. **Edge** latency is k6's view of the ingest
 service. **Peak lag** is the attribution consumer's largest backlog, and **Drained after** is how
@@ -37,6 +44,10 @@ duplicates).
 | 2026-10-28 | `8fcfd76` | control, 200 workers | 12 / 190 ms | 17 ms / 287 s | 47503 | 321s | 67989 (10 lost) | 29610 | 10 |
 | 2026-10-28 | `b0c2515` | normal, 4 workers | 11.85 / 11.66 ms | 17 ms / 148 s | 45402 | 163s | 67999 (all) | 0 | 0 |
 | 2026-10-28 | `b0c2515` | control, 200 workers | 11.84 / 189.76 ms | 16 ms / 797 s | 51754 | 837s | 67999 (all, after retries) | 25134 | 0 |
+| 2026-11-14 | `693c618` | normal, 4 workers, AWS | 11.15 / 11.57 ms | < 0.1 s / 127 s | ~44438 | 131s | 67799 (all) | 0 | 0 |
+| 2026-11-14 | `693c618`+fix | normal, 4 workers, AWS | 11.15 / 11.57 ms | < 0.1 s / 126 s | ~44197 | 133s | 67799 (all) | 0 | 0 |
+| 2026-11-14 | `693c618`+fix | normal, 4 workers, AWS | 11.15 / 11.58 ms | < 0.1 s / 126 s | ~44164 | 135s | 67799 (all) | 0 | 0 |
+| 2026-11-14 | `693c618`+fix | control, 200 workers, AWS | 11.15 / 190.25 ms | < 0.1 s / 325 s | ~48960 | 374s | 67798 (1 dead-lettered) | 32686 | 1 |
 
 Rows come from the same runs as the table above (`run.sh` prints both). **Mode** is `normal`
 (workers = model capacity) or `control` (the limit removed). The load-test model profile is
@@ -51,6 +62,8 @@ Model latency should stay flat in `normal`; time to insight rises during the spi
 |---|---|---|---|---|---|---|---|---|---|
 | 2026-11-13 | `3d15a5c`+crash scripts | 8 CPU, Ubuntu WSL2 | crash, 100/s for 240s, seed 1 | 23 | 24001 | 170 | 6s | ✓ 24001 | 0 |
 | 2026-11-13 | `3d15a5c`+crash scripts | 8 CPU, Ubuntu WSL2 | clean, 100/s for 240s, seed 1 | 0 | 24001 | 0 | 5s | ✓ 24001 | 0 |
+| 2026-11-14 | `693c618` | AWS c7g.xlarge | crash, 100/s for 240s, seed 1 | 23 | 24001 | 175 | 5s | ✓ 24001 | 0 |
+| 2026-11-14 | `1cdf79b` | AWS c7g.xlarge | clean, 100/s for 240s, seed 1 | 0 | 24001 | 0 | 6s | ✓ 24001 | 0 |
 
 Run with `./loadtest/crash.sh` (`KILLS=0` for the clean run). **Kills** are `kill -9` of a random
 service every 5–15 s; this run killed attribution 8 times, inference and `nats-server` 6 each,
@@ -118,6 +131,100 @@ costs about ten times as much per token ($0.80 / $4.00 against $0.075 / $0.30 pe
 throughput.
 
 The whole calibration spent about 93,000 tokens and cost $0.
+
+## Server benchmarks (M3)
+
+Measured on 2026-11-14 in the [demo environment](../infra/demo/README.md): the system under
+test on a c7g.xlarge (4 Graviton vCPU, 8 GB, gp3 disk, Ubuntu 26.04) running NATS, Postgres and
+the services under systemd; k6 on a c7g.large (2 vCPU) in the same availability zone. Code at
+`693c618`, plus the script fixes in `2ce2442` and `1cdf79b`, which change no service. One
+session, 74 minutes of instance time, about **$0.28** at list prices. Spike and crash rows are
+in the tables above; the rest is here.
+
+| Measurement | Target | Result |
+|---|---|---|
+| 1,000/s spike, normal (×3) | 0 lost, 0 duplicated, model p95 flat ±10% | ✓ all three: edge p99 0.96–1.05 ms, model p95 11.15 → 11.58 ms (+4%), drained in 131–135 s |
+| 1,000/s spike, control | the model overloads without the limit | ✓ model p95 11.15 → 190 ms (17×), 32,686 timeouts, 1 dead letter; drained in 374 s against 133 s |
+| Edge step-up | highest rate with p99 < 50 ms, 0 errors, load generator < 80% CPU | **at least 4,000/s** (p99 6.4 ms); above it the load generator, not the server, is the limit (below) |
+| Attribution sustained throughput | measured, bottleneck named | **~620 messages/s**; one Postgres transaction per message, waiting on the commit (below) |
+| CPU profiles | our code against I/O | **our code is 0.1% (ingest) and 0.5% (attribution) of their CPU**; each uses about 0.2 of a core at 1,000/s |
+| Crash test | identical counts and checksum after ≥ 20 kills | ✓ 23 kills, 24,001 webhooks, checksum `607d7f28…`, the same as the clean run and the laptop's |
+| Monitor | detects within 60 s; 0 alerts in normal spikes | ✓ 5.0 s to `[FIRING] acked_not_written`; 0 emails across the three normal spikes. The control run had false alerts (below) |
+| Replay recovery | rows after replay equal the clean run | ✓ 625 lost, all 7,649 restored in 2.4 s; a second replay recorded 0 |
+| `sync_interval: always` | edge p99 against the default | **caps the edge at 300–500/s**: p99 11.4 ms at 300/s (default ~1 ms); at 500/s and 1,000/s publishes time out (below) |
+
+**Edge step-up.** 60 s per step, consumers and monitor paused (`make demo-stepup`):
+
+| Rate/s | p50 ms | p99 ms | Dropped by k6 | Load generator CPU | Server CPU |
+|---|---|---|---|---|---|
+| 500 | 0.42 | 0.52 | 0 | 7% | 4% |
+| 1,000 | 0.40 | 0.84 | 0 | 8% | 7% |
+| 2,000 | 0.39 | 0.97 | 0 | 27% | 17% |
+| 3,000 | 0.40 | 1.55 | 0 | 39% | 23% |
+| 4,000 | 0.40 | 6.39 | 0 | 48% | 31% |
+| 5,000 | 0.44 | 15.08 | 16 | 51% | 32% |
+| 6,000 | 0.46 | 38.27 | 261 | 62% | 41% |
+| 8,000 | 0.77 | 81.91 | 14,523 | 72% | 50% |
+
+No request failed at any step. From 5,000/s k6 dropped iterations, so those steps fail the
+criterion; the server's CPU stayed at or below 50%. A re-run of the top steps with 1,500 virtual
+users started up front removed the drops at 5,000/s but made p99 *worse* (4,000/s: 23.6 ms;
+5,000/s: 92.7 ms) as k6's own CPU rose to 60%. Latency that worsens when k6 does more work,
+with the server two-thirds idle, says the 2-vCPU load generator sets the limit above 4,000/s.
+CPU is the mean over both cores, so the 80% guard didn't trip. Finding the server's real
+ceiling needs a bigger load generator.
+
+**Attribution throughput.** 102,999 webhooks queued with the consumers stopped, then attribution
+started alone (`make demo-throughput`): drained in 171 s at a steady 610–650/s. Attribution used
+21% of one core and Postgres 32% of one; the machine was 15% busy with 14% iowait. In
+attribution's profile, 60% of its CPU is under `Store.Record`'s transaction, and its own code
+0.5%. **Nothing is saturated: each message waits for its own transaction's round trips and
+commit, one at a time** (about 1.6 ms each). Batching messages into one transaction, or
+handling several at once, is the M4 candidate ([D1](plan-m3.md#decisions-agreed-before-starting));
+a faster language would not move this. It matches the laptop's ~625/s.
+
+**CPU profiles.** 30 s during a normal spike's hold (`PROFILE=1`), each sample's leaf function
+grouped:
+
+| | ingest | attribution (spike) | attribution (drain) |
+|---|---|---|---|
+| CPU used | 24% of one core | 21% | 19% |
+| Go runtime: scheduler, GC, memory | 50% | 43% | 46% |
+| Syscalls: network and disk I/O | 27% | 32% | 32% |
+| Standard library: HTTP, crypto, JSON | 18% | 15% | 14% |
+| Libraries: NATS, pgx | 4% | 9% | 7% |
+| **Our code** | **0.1%** | **0.5%** | **0.5%** |
+
+Most of the runtime share is the scheduler parking and waking goroutines between I/O
+(`futex`, `findRunnable`). Rewriting our code in another language would at best remove the last
+row; the [decision record](decisions/0001-event-stream.md) uses this as its evidence.
+
+**Monitor.** The drill (`make demo-fault`) ran 50/s through attribution's `faultinject` build and
+turned on the silent write failure 30 s in; with the default 1-minute window the alert fired at
+the next 5 s reading, 5.0 s after the fault, and resolved 55 s after it was turned off.
+**False alerts in the control run:** `stale_backlog (inference)` fired and resolved, which is
+right, as the model was overloaded. `acked_not_written (inference)` fired four times, which is
+wrong: only one message was dead-lettered. The rule counts acknowledgements as the movement of
+the consumer's ack floor, the oldest unacknowledged message. A message stuck in timeout retries
+holds the floor while later ones are written; when it clears, the floor jumps past thousands in
+one window and they look unwritten. Any heavy retrying could do the same, a hosted model's `429`
+retries included.
+
+**`sync_interval: always`.** NATS reported `sync_always: true` (default: `sync_interval` 120 s).
+Each webhook then waits for its write to reach the disk:
+
+| Rate/s, hold | Edge p50 / p99 | Failed | Stored |
+|---|---|---|---|
+| 300, 30 s | 3.30 / 11.44 ms | 0% | all |
+| 500, 30 s | 2,884 / 5,001 ms | 18% | all, including the failed ones |
+| 1,000, 60 s | 5,001 / 5,001 ms | 84% | all, including the failed ones |
+
+Above about 300–500/s the syncs queue up and publishes reach ingest's 5 s deadline, so ingest
+answers with an error and the sender retries. Nothing was lost: every accepted webhook was
+stored once, and so was every failed one, because the stream finished storing them after ingest
+stopped waiting (a sender's retry is then deduplicated). The default (sync every 2 minutes) risks up to
+2 minutes of acknowledged webhooks on a power loss of the server; `always` closes that at a
+tenth of the throughput. The trade-off is argued in the decision record.
 
 ## Notes
 
