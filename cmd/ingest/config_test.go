@@ -52,6 +52,7 @@ func setValidEnv(t *testing.T) {
 	t.Setenv("NATS_URL", "")
 	t.Setenv("INGEST_FORWARD_TO", "")
 	t.Setenv("SENDGRID_PUBLIC_KEY", "")
+	t.Setenv("PPROF_ADDR", "")
 }
 
 // The email route turns on only with a valid SendGrid key; a bad one stops ingest at startup.
@@ -140,5 +141,19 @@ func TestConfigLogValueHidesAuthToken(t *testing.T) {
 
 	if got := cfg.LogValue().String(); strings.Contains(got, "secret-token") {
 		t.Errorf("logged config contains the auth token: %s", got)
+	}
+}
+
+// Profiling is opt-in (PPROF_ADDR), for the server benchmarks' CPU profiles.
+func TestLoadConfigPprofAddr(t *testing.T) {
+	setValidEnv(t)
+	t.Setenv("PPROF_ADDR", "127.0.0.1:6060")
+	cfg, err := loadConfig()
+	if err != nil || cfg.pprofAddr != "127.0.0.1:6060" {
+		t.Errorf("pprofAddr = %q, err %v; want 127.0.0.1:6060", cfg.pprofAddr, err)
+	}
+	t.Setenv("PPROF_ADDR", "")
+	if cfg, _ := loadConfig(); cfg.pprofAddr != "" {
+		t.Errorf("pprofAddr = %q without PPROF_ADDR; want off", cfg.pprofAddr)
 	}
 }

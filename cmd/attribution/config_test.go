@@ -56,3 +56,17 @@ func TestParseReplayFrom(t *testing.T) {
 		}
 	}
 }
+
+// Profiling is opt-in (PPROF_ADDR), for the server benchmarks' CPU profiles.
+func TestLoadConfigPprofAddr(t *testing.T) {
+	t.Setenv("DATABASE_URL", "postgres://leads_app:s3cret@127.0.0.1:5432/leads")
+	t.Setenv("PPROF_ADDR", "127.0.0.1:6061")
+	cfg, err := loadConfig()
+	if err != nil || cfg.pprofAddr != "127.0.0.1:6061" {
+		t.Errorf("pprofAddr = %q, err %v; want 127.0.0.1:6061", cfg.pprofAddr, err)
+	}
+	t.Setenv("PPROF_ADDR", "")
+	if cfg, _ := loadConfig(); cfg.pprofAddr != "" {
+		t.Errorf("pprofAddr = %q without PPROF_ADDR; want off", cfg.pprofAddr)
+	}
+}
