@@ -1,6 +1,6 @@
 # Plan: milestone 3 (M3)
 
-Status: **agreed; in progress** · Spec: [design.md](design.md) · Previous: [M2 plan](plan-m2.md)
+Status: **done** · Spec: [design.md](design.md) · Previous: [M2 plan](plan-m2.md)
 
 M3 goal ([spec goals 5–7](design.md#1-goals)): show that the pipeline holds up when things go
 wrong, and measure it on server hardware. Done when:
@@ -302,7 +302,8 @@ deviations below and in [benchmarks](benchmarks.md).
 | 17: postmortem | [#34](https://github.com/cferrante/call-event-pipeline/pull/34) | A silent write failure on the server was detected in 6.5 s and all 621 lost calls replayed; the write-up names a misleading second alert and "resolved isn't recovered" as follow-ups |
 | 18: decision record | [#35](https://github.com/cferrante/call-event-pipeline/pull/35) | JetStream stays: at 1M–100M events a month every option handles the load and cost is nearly all fixed (Kinesis on demand ~$60–80, three NATS nodes $164, MSK $462+); JetStream wins on per-message retries, dead letters and deduplication in the broker and on $0 native tests. Our code is 0.1–0.5% of CPU, so no C++ |
 | 19: pitch | [#36](https://github.com/cferrante/call-event-pipeline/pull/36) | M3's results told for a non-technical reader on one page: no loss in a 1,000/s rush, 23 crashes with identical data, a hidden failure emailed in 5–7 s and fully restored, 98% accurate classification, $0.28 of server tests |
-| 20: demo runbook | #37 | A 10-minute AWS walkthrough (spike absorbed, silent failure emailed and replayed) with the expected result of each step; seven M3 terms in the concepts guide; README and `CLAUDE.md` show M3's state |
+| 20: demo runbook | [#37](https://github.com/cferrante/call-event-pipeline/pull/37) | A 10-minute AWS walkthrough (spike absorbed, silent failure emailed and replayed) with the expected result of each step; seven M3 terms in the concepts guide; README and `CLAUDE.md` show M3's state |
+| 21: code review | [#38](https://github.com/cferrante/call-event-pipeline/pull/38) | 10 findings checked against the code: 8 fixed test-first (the monitor now alerts when it can't read the pipeline; no email is lost to a slow upload, an oversized event or a token budget; the password is off command lines), 2 declined with reasons |
 
 ## Deviations from the plan
 
@@ -660,7 +661,56 @@ deviations below and in [benchmarks](benchmarks.md).
 
 ## Code-review outcomes
 
-None yet.
+Step 21 ran `/code-review` (medium) on all M3 changes (`a9c2160..c284aff`, about 10,000 lines
+of code): 10 findings, each checked against the code before acting. 8 fixed test-first, each
+test seen failing for the reported reason and each fix broken on purpose to prove the test
+catches it; 2 declined (one by your decision, as a known limitation).
+
+1. **Fixed: the monitor was silent while it couldn't take readings.** A failed reading was
+   skipped before any rule ran, so with Postgres or NATS down nothing was emailed. Readings
+   that fail for 30 s now raise `readings_failing`; alerts already firing are kept, not
+   resolved, and a good reading resolves it. Breaks: dropping the kept alerts "resolved"
+   `arrivals_stopped` mid-outage; not restarting the count after a good reading fired on two
+   separate 20 s failures (a second test, added because the first missed this break).
+2. **Fixed: `CANARY_INTERVAL=0` left `arrivals_stopped` firing forever.** With the canary off
+   the rule is off; a `CANARY_MAX_AGE` under twice `CANARY_INTERVAL` (which would flap) stops
+   the monitor at start-up.
+3. **Fixed: a slow email upload lost its `200`.** The route moved the read deadline to 60 s,
+   but the server's 15 s write deadline still ran from the headers. Reproduced with a 200 ms
+   server and a 500 ms upload: published, then `EOF`, so SendGrid would resend it. Both
+   deadlines now move; a second test checks the route is wired with the timeout.
+4. **Fixed: a long email could never be classified by the hosted model.** 64 KB of text is
+   about 23,000 estimated tokens against 7,200 a minute, so it was retried and dead-lettered.
+   Only the first 8,000 bytes are sent, fewer if the budget a minute is smaller, cut between
+   characters.
+5. **Fixed: canaries spent the hosted model's daily token budget.** A text-less interaction
+   (a call, or the canary every 10 s) was still sent to Groq, using the 100,000-token default
+   in about an hour. It is now stored as `unknown` from model version `no-text` without a
+   call. The stub is unchanged, so load tests still model a call's latency.
+7. **Fixed: an email's event could exceed NATS's 1 MB message limit** (4.3 MB in the test:
+   repeated fields, JSON's 6-byte escapes), and would be retried by SendGrid until lost. One
+   value per field within a 96 KB total (subject 998 bytes, other small fields 4 KB, then
+   text, then headers). The first test text half-escaped and missed a removed budget; it now
+   uses all-escaped characters.
+8. **Fixed: the load tests put the database password on command lines** (`psql`, `env`),
+   readable by any local user; this predates M3 in `run.sh`. `loadtest/pg.sh` passes it
+   through libpq's `PG*` variables. Measured with counting wrappers for `psql` and `env` in a
+   short clean crash test: 23 of 23 `psql` and 2 of 3 `env` calls carried it before, none
+   after; a short spike run, none. A sampling watcher saw 0 even before, since each call
+   lives milliseconds, so the wrappers are the evidence. `loadtest/pg_test.sh` runs in CI.
+   Assumed, not run: the AWS demo's socket URL (`postgresql://postgres@/postgres`) works on
+   the server; its parsing is tested.
+9. **Fixed: each monitor reading asked for stream and consumer info twice.** Measured by the
+   server's API count: 8 requests per reading before, 5 after (2 are the dead-letter reader's
+   ordered consumer, which nats.go recreates for every fetch).
+10. **Declined: merge the three loopback-address checks** (`profiling`, `cmd/monitor`,
+    `cmd/mailsink`). The reported drift isn't there: all three accept `localhost` and loopback
+    IPs only, each has its own error message naming its variable, and each is tested.
+6. **Declined for M3 (decision: known limitation, M4 candidate): an email to several tracking
+   addresses credits one campaign**, and a reused `Message-ID` drops an email as a duplicate.
+   Both are rare and M3's goals are met without the fix, which changes the event's ID and the
+   schema contract. Recorded in
+   [known limitations](design.md#12-decisions-and-known-limitations).
 
 ## Results
 

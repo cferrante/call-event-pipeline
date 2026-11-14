@@ -75,6 +75,18 @@ func TestStoppedArrivalsFireWithinThirtySeconds(t *testing.T) {
 	}
 }
 
+// With the canary turned off (CanaryMaxAge 0), its absence means nothing: arrivals stopped
+// never fires, while the other rules still run.
+func TestArrivalsStoppedIsOffWithoutACanary(t *testing.T) {
+	cfg := DefaultConfig
+	cfg.CanaryMaxAge = 0
+	s := newSim()
+	s.run(70*time.Minute, 20, false) // traffic, but no canary
+	if got := firingAt(cfg, s.history); len(got) != 0 {
+		t.Errorf("without a canary: %s", describe(got))
+	}
+}
+
 func TestPartialDropFiresVolumeDrop(t *testing.T) {
 	s := newSim()
 	s.run(70*time.Minute, 20, true)

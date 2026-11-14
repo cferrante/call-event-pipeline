@@ -190,3 +190,49 @@ func TestSamplerCountsAcksPastAMessageInProgress(t *testing.T) {
 		t.Errorf("acked = %d after message 1 is acknowledged too, want 5", a)
 	}
 }
+
+// A reading runs every 5 s for as long as the monitor does, so it asks JetStream only what it
+// needs: the stream's info and each existing consumer's, once each (looking one up already
+// returns its info, so asking again would double the requests), plus 2 for the dead-letter
+// reader, an ordered consumer that nats.go recreates for every fetch. 8 before the fix.
+func TestSamplerMakesOneRequestPerStreamAndConsumer(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	defer cancel()
+	js, err := jetstream.New(natstest.Start(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	db := dbtest.Migrated(t)
+	if err := stream.EnsureStream(ctx, js); err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []consumer.Config{consumer.Attribution, consumer.Inference(1)} {
+		if _, err := consumer.EnsureConsumer(ctx, js, c); err != nil {
+			t.Fatal(err)
+		}
+	}
+	s, err := NewSampler(ctx, js, db, "canary")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := s.Sample(ctx, time.Now()); err != nil { // the first reading sets up the DLQ reader
+		t.Fatal(err)
+	}
+	apiTotal := func() uint64 {
+		info, err := js.AccountInfo(ctx)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return info.API.Total
+	}
+	before := apiTotal()
+	if _, err := s.Sample(ctx, time.Now()); err != nil {
+		t.Fatal(err)
+	}
+	// The AccountInfo call itself is one request.
+	got := apiTotal() - before - 1
+	t.Logf("one reading: %d JetStream API requests", got)
+	if got > 5 {
+		t.Errorf("one reading made %d JetStream API requests, want at most 5 (the stream, two consumers, the dead-letter reader's 2)", got)
+	}
+}

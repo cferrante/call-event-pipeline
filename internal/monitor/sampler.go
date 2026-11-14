@@ -49,11 +49,8 @@ func (s *Sampler) Sample(ctx context.Context, now time.Time) (Sample, error) {
 	if err != nil {
 		return out, fmt.Errorf("stream %s: %w", stream.StreamName, err)
 	}
-	info, err := leads.Info(ctx)
-	if err != nil {
-		return out, fmt.Errorf("stream info: %w", err)
-	}
-	out.Arrivals = info.State.LastSeq
+	// Looking the stream up fetched its info; asking again would be a second request.
+	out.Arrivals = leads.CachedInfo().State.LastSeq
 
 	var canary *time.Time
 	if err := s.db.QueryRow(ctx, `SELECT max(ingested_at) FROM interactions WHERE from_number = $1`, s.canaryFrom).
@@ -75,10 +72,7 @@ func (s *Sampler) Sample(ctx context.Context, now time.Time) (Sample, error) {
 		if err != nil {
 			return out, fmt.Errorf("consumer %s: %w", name, err)
 		}
-		ci, err := cons.Info(ctx)
-		if err != nil {
-			return out, fmt.Errorf("consumer %s info: %w", name, err)
-		}
+		ci := cons.CachedInfo() // fetched by the lookup, as for the stream
 		// Acknowledged: everything delivered except what still awaits an ack. Not the ack
 		// floor, which stalls behind one slow or retried message and then jumps past every
 		// later one, so a window looked like thousands acknowledged and none written.

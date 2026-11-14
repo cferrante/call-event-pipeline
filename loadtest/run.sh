@@ -27,7 +27,9 @@ esac
 secs() { echo "${1%s}"; } # "10s" -> 10
 NATS_PORT=4322 MON_PORT=8322 INGEST_PORT=8091
 DB_NAME=leads_loadtest
-DB_URL="${DATABASE_URL%/*}/${DB_NAME}"
+DB_URL="${DATABASE_URL%/*}/${DB_NAME}" # passed to services in their environment only
+source loadtest/pg.sh
+pg_use "$DATABASE_URL"
 NATS_URL_LT="nats://127.0.0.1:${NATS_PORT}"
 RESULTS="loadtest/results/$(date +%Y%m%d-%H%M%S)-${MODE}"
 WORK=$(mktemp -d)
@@ -38,7 +40,7 @@ cleanup() {
   # Reverse start order, so each service can drain while NATS is still up.
   for (( i=${#pids[@]}-1; i>=0; i-- )); do kill -INT "${pids[i]}" 2>/dev/null || true; done
   wait 2>/dev/null || true
-  psql -X -q "$DATABASE_URL" -c "DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)" || true
+  psql -X -q -c "DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)" || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -49,7 +51,7 @@ wait_for() { # wait_for <description> <command...>
   for _ in $(seq 120); do "$@" >/dev/null 2>&1 && return 0; sleep 0.5; done
   log "timed out waiting for $what"; exit 1
 }
-sql() { psql -X -A -t "$DB_URL" -c "$1"; }
+sql() { PGDATABASE=$DB_NAME psql -X -A -t -c "$1"; }
 # Prints "attribution_pending attribution_ack_pending inference_pending inference_ack_pending
 # dead_letters" from the NATS monitoring endpoint, in one call (python3: jq isn't installed).
 # Retries a failed read; if it keeps failing, prints "?" for each, which no check accepts as 0.
@@ -82,7 +84,7 @@ log "building services"
 for svc in ingest attribution inference; do go build -o "$WORK/$svc" "./cmd/$svc"; done
 
 log "creating database ${DB_NAME}"
-psql -X -q "$DATABASE_URL" -c "DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)" -c "CREATE DATABASE ${DB_NAME}"
+psql -X -q -c "DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)" -c "CREATE DATABASE ${DB_NAME}"
 
 log "starting NATS on ${NATS_PORT}"
 nats-server -js -sd "$WORK/nats" -a 127.0.0.1 -p $NATS_PORT -m $MON_PORT >"$RESULTS/nats.log" 2>&1 &
@@ -92,7 +94,7 @@ wait_for "NATS" curl -sf "http://127.0.0.1:${MON_PORT}/healthz"
 log "starting attribution"
 DATABASE_URL="$DB_URL" NATS_URL="$NATS_URL_LT" "$WORK/attribution" >"$RESULTS/attribution.log" 2>&1 &
 pids+=($!)
-wait_for "migrations" bash -c "[ \"\$(psql -X -A -t '$DB_URL' -c \"SELECT count(*) FROM pg_tables WHERE tablename = 'insights'\")\" = 1 ]"
+PGDATABASE=$DB_NAME wait_for "migrations" bash -c "[ \"\$(psql -X -A -t -c \"SELECT count(*) FROM pg_tables WHERE tablename = 'insights'\")\" = 1 ]"
 sql "INSERT INTO tracking_numbers (phone_e164, campaign_id, source) VALUES
        ('+18005550001', 'search-fall', 'google'),
        ('+18005550002', 'morning-show', 'radio'),

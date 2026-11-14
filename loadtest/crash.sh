@@ -27,7 +27,9 @@ KILLS=${KILLS:-on} DRAIN_TIMEOUT=${DRAIN_TIMEOUT:-300}
 MODEL_LATENCY=${MODEL_LATENCY:-10ms} MODEL_TIMEOUT=${MODEL_TIMEOUT:-200ms} MODEL_CAPACITY=${MODEL_CAPACITY:-4} MODEL_JITTER=${MODEL_JITTER:-0.1}
 NATS_PORT=4323 MON_PORT=8323 INGEST_PORT=8092
 DB_NAME=leads_crash
-DB_URL="${DATABASE_URL%/*}/${DB_NAME}"
+DB_URL="${DATABASE_URL%/*}/${DB_NAME}" # passed to services in their environment only
+source loadtest/pg.sh
+pg_use "$DATABASE_URL"
 NATS_URL_CT="nats://127.0.0.1:${NATS_PORT}"
 MODE=$([ "$KILLS" = 0 ] && echo clean || echo crash)
 RESULTS="${RESULTS_ROOT:-loadtest/results}/$(date +%Y%m%d-%H%M%S)-${MODE}"
@@ -36,7 +38,7 @@ mkdir -p "$RESULTS"
 loops=()
 
 log() { echo "[$(date +%H:%M:%S)] $*" | tee -a "$RESULTS/events.log"; }
-sql() { psql -X -A -t "$DB_URL" -c "$1"; }
+sql() { PGDATABASE=$DB_NAME psql -X -A -t -c "$1"; }
 
 cleanup() {
   touch "$WORK/stop"
@@ -46,7 +48,7 @@ cleanup() {
   done
   for pid in "${loops[@]}"; do kill "$pid" 2>/dev/null || true; done
   wait 2>/dev/null || true
-  psql -X -q "$DATABASE_URL" -c "DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)" || true
+  psql -X -q -c "DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)" || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -102,23 +104,25 @@ else
   log "building services"
   for svc in ingest attribution inference; do go build -o "$WORK/$svc" "./cmd/$svc"; done
 fi
-psql -X -q "$DATABASE_URL" -c "DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)" -c "CREATE DATABASE ${DB_NAME}"
+psql -X -q -c "DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)" -c "CREATE DATABASE ${DB_NAME}"
 
 log "starting nats-server, attribution, inference and ingest under restart loops"
 supervise nats nats-server -js -sd "$WORK/nats" -a 127.0.0.1 -p $NATS_PORT -m $MON_PORT
 wait_for "NATS" curl -sf "http://127.0.0.1:${MON_PORT}/healthz"
-supervise attribution env DATABASE_URL="$DB_URL" NATS_URL="$NATS_URL_CT" "$WORK/attribution"
-wait_for "migrations" bash -c "[ \"\$(psql -X -A -t '$DB_URL' -c 'SELECT count(*) FROM schema_migrations')\" = $(ls migrations/*.sql | wc -l) ]"
+# Settings go in the environment, not on env's command line, where ps would show the password.
+DATABASE_URL="$DB_URL" NATS_URL="$NATS_URL_CT" supervise attribution "$WORK/attribution"
+PGDATABASE=$DB_NAME wait_for "migrations" bash -c "[ \"\$(psql -X -A -t -c 'SELECT count(*) FROM schema_migrations')\" = $(ls migrations/*.sql | wc -l) ]"
 sql "INSERT INTO tracking_numbers (phone_e164, campaign_id, source) VALUES
        ('+18005550001', 'search-fall', 'google'),
        ('+18005550002', 'morning-show', 'radio'),
        ('+18005550003', 'spring-flyer', 'print')" >/dev/null
-supervise inference env DATABASE_URL="$DB_URL" NATS_URL="$NATS_URL_CT" INFERENCE_WORKERS=$MODEL_CAPACITY \
-  MODEL_CAPACITY=$MODEL_CAPACITY MODEL_LATENCY=$MODEL_LATENCY MODEL_TIMEOUT=$MODEL_TIMEOUT MODEL_JITTER=$MODEL_JITTER "$WORK/inference"
+DATABASE_URL="$DB_URL" NATS_URL="$NATS_URL_CT" INFERENCE_WORKERS=$MODEL_CAPACITY \
+  MODEL_CAPACITY=$MODEL_CAPACITY MODEL_LATENCY=$MODEL_LATENCY MODEL_TIMEOUT=$MODEL_TIMEOUT MODEL_JITTER=$MODEL_JITTER \
+  supervise inference "$WORK/inference"
 TOKEN=$(openssl rand -hex 16)
 PUBLIC_URL="http://127.0.0.1:${INGEST_PORT}"
-supervise ingest env INGEST_PORT=$INGEST_PORT INGEST_PUBLIC_URL=$PUBLIC_URL TWILIO_AUTH_TOKEN=$TOKEN \
-  NATS_URL="$NATS_URL_CT" "$WORK/ingest"
+INGEST_PORT=$INGEST_PORT INGEST_PUBLIC_URL=$PUBLIC_URL TWILIO_AUTH_TOKEN=$TOKEN NATS_URL="$NATS_URL_CT" \
+  supervise ingest "$WORK/ingest"
 wait_for "ingest" curl -sf "${PUBLIC_URL}/healthz"
 
 # The killer: a seeded sequence, so a failing run can be repeated kill for kill.

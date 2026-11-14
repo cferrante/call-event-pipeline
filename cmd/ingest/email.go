@@ -22,9 +22,9 @@ const (
 	maxEmailBytes = 30 << 20
 	// maxEmailFieldBytes caps each text field kept in the event.
 	maxEmailFieldBytes = 64 << 10
-	// emailReadTimeout replaces the server's 10-second read limit for this route only: 30 MB
-	// needs longer on a slow link, while calls and SMS keep the tight limit.
-	emailReadTimeout = 60 * time.Second
+	// emailTimeout replaces the server's 10-second read and 15-second write limits for this
+	// route only: 30 MB needs longer on a slow link, while calls and SMS keep the tight limits.
+	emailTimeout = 60 * time.Second
 )
 
 // emailWebhook is the ingest edge for SendGrid Inbound Parse (docs/design.md, section 5.1).
@@ -35,6 +35,8 @@ type emailWebhook struct {
 	pub      publisher
 	now      func() time.Time
 	maxBytes int64
+	// timeout replaces the server's read and write limits for this route; 0 keeps them.
+	timeout time.Duration
 }
 
 func (h *emailWebhook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
@@ -49,8 +51,14 @@ func (h *emailWebhook) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "want multipart/form-data", http.StatusBadRequest)
 		return
 	}
-	// Errors here only mean the server doesn't support deadlines (e.g. in tests).
-	_ = http.NewResponseController(w).SetReadDeadline(time.Now().Add(emailReadTimeout))
+	// Both deadlines: the server's write deadline runs from the request headers, so moving
+	// only the read deadline would let a slow upload be published and then lose its 200.
+	// Errors here only mean the server doesn't support deadlines (e.g. a test recorder).
+	if h.timeout > 0 {
+		rc := http.NewResponseController(w)
+		_ = rc.SetReadDeadline(time.Now().Add(h.timeout))
+		_ = rc.SetWriteDeadline(time.Now().Add(h.timeout))
+	}
 
 	verifier := sendgrid.NewStreamVerifier(h.key, ts)
 	body := io.TeeReader(http.MaxBytesReader(w, r.Body, h.maxBytes), verifier)

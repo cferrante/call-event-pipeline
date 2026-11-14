@@ -10,15 +10,30 @@ import (
 	"net/url"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // ErrUnusableEmail means a signed inbound email can't become an event; retrying won't help.
 var ErrUnusableEmail = errors.New("unusable inbound email")
 
-// keptEmailFields are the Inbound Parse fields stored in params for replay. html is left out:
-// it repeats text at several times the size. Attachments are never kept.
-var keptEmailFields = []string{"from", "to", "cc", "subject", "text", "headers", "envelope",
-	"charsets", "SPF", "dkim", "spam_score"}
+// keptEmailFields are the Inbound Parse fields stored in params for replay, in the order they
+// draw on maxKeptEmailBytes: the small fields first, then text, then headers, the largest and
+// least needed. html is left out: it repeats text at several times the size. Attachments are
+// never kept.
+var keptEmailFields = []string{"from", "to", "cc", "subject", "envelope", "charsets", "SPF", "dkim",
+	"spam_score", "text", "headers"}
+
+const (
+	// maxKeptEmailBytes is the total kept in params. JSON can encode a byte as up to 6 ('<' is
+	// \u003c), so with the subject this keeps an event under about 600 KB, inside NATS's 1 MB limit.
+	maxKeptEmailBytes = 96 << 10
+	// maxSubjectBytes is the longest line an email may have (RFC 5322); the subject is stored
+	// twice, in params and on its own.
+	maxSubjectBytes = 998
+	// maxSmallFieldBytes caps each kept field other than subject, text and headers, so that
+	// however large they arrive they leave text most of the budget.
+	maxSmallFieldBytes = 4 << 10
+)
 
 // FromInboundEmail builds an envelope from SendGrid Inbound Parse fields (the default,
 // non-raw format), plus how many attachment parts the request had.
@@ -51,10 +66,21 @@ func FromInboundEmail(fields url.Values, attachments int, receivedAt time.Time) 
 		from = strings.ToLower(a.Address)
 	}
 
-	params := url.Values{}
+	// One value per field, within a total budget, so the event always fits a stream message.
+	params, budget := url.Values{}, maxKeptEmailBytes
 	for _, k := range keptEmailFields {
-		if v, ok := fields[k]; ok {
-			params[k] = append([]string(nil), v...)
+		if v, ok := fields[k]; ok && len(v) > 0 {
+			limit := budget
+			switch k {
+			case "subject":
+				limit = min(limit, maxSubjectBytes)
+			case "text", "headers":
+			default:
+				limit = min(limit, maxSmallFieldBytes)
+			}
+			kept := cut(v[0], limit)
+			budget -= len(kept)
+			params.Set(k, kept)
 		}
 	}
 	return Envelope{
@@ -66,9 +92,21 @@ func FromInboundEmail(fields url.Values, attachments int, receivedAt time.Time) 
 		To:              strings.ToLower(strings.TrimSpace(smtp.To[0])),
 		ReceivedAt:      receivedAt.UTC(),
 		Params:          params,
-		Subject:         fields.Get("subject"),
+		Subject:         cut(fields.Get("subject"), maxSubjectBytes),
 		AttachmentCount: attachments,
 	}, nil
+}
+
+// cut returns at most n bytes of s, cut between characters.
+func cut(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	n = max(n, 0)
+	for n > 0 && !utf8.RuneStart(s[n]) {
+		n--
+	}
+	return s[:n]
 }
 
 // messageID reads the Message-ID from raw header text.

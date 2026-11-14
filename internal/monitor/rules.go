@@ -19,6 +19,7 @@ const (
 	RuleVolumeDrop      = "volume_drop"
 	RuleAckedNotWritten = "acked_not_written"
 	RuleStaleBacklog    = "stale_backlog"
+	RuleReadingsFailing = "readings_failing"
 )
 
 // Sample is one reading of the pipeline.
@@ -39,7 +40,7 @@ type ConsumerSample struct {
 
 // Config holds the rules' thresholds.
 type Config struct {
-	// Arrivals stopped: no canary stored for this long.
+	// Arrivals stopped: no canary stored for this long; 0 when the canary is off.
 	CanaryMaxAge time.Duration
 	// Volume drop: the recent rate is below DropRatio of the baseline, the median per-minute
 	// rate over the Baseline before it, provided that baseline is at least MinRate per second.
@@ -53,6 +54,8 @@ type Config struct {
 	MinAcked        uint64
 	// Stale backlog: a consumer's oldest pending message is older than this.
 	StaleAfter time.Duration
+	// Readings failing: the monitor itself has failed to read the pipeline for this long.
+	ReadingsFailAfter time.Duration
 }
 
 // DefaultConfig is the spec's thresholds.
@@ -60,7 +63,7 @@ var DefaultConfig = Config{
 	CanaryMaxAge: 30 * time.Second,
 	Recent:       5 * time.Minute, Baseline: time.Hour, DropRatio: 0.2, MinRate: 1,
 	WriteWindow: time.Minute, MinWrittenRatio: 0.9, MinAcked: 100,
-	StaleAfter: 5 * time.Minute,
+	StaleAfter: 5 * time.Minute, ReadingsFailAfter: 30 * time.Second,
 }
 
 // Finding is a rule that is firing now.
@@ -90,6 +93,9 @@ func Evaluate(cfg Config, history []Sample) []Finding {
 // synthetic webhook sent every 10 s, so its absence means the path from the provider to the
 // database is broken somewhere, even when real traffic is naturally quiet.
 func arrivalsStopped(cfg Config, h []Sample) []Finding {
+	if cfg.CanaryMaxAge == 0 {
+		return nil // no canary is being sent, so its absence means nothing
+	}
 	now := h[len(h)-1]
 	last := now.CanarySeen
 	if last.Before(h[0].At) {

@@ -15,9 +15,10 @@ large webhook spikes with zero loss and without slowing down AI inference.
 
 Milestones 1 (ingest and attribution), 2 (inference with backpressure) and 3 (schema contract
 and email channel, silent-failure monitor, crash test, on-demand AWS environment, server
-benchmarks, decision record, pitch and demo runbook) have met their goals; see
-[the M3 plan](docs/plan-m3.md), whose last step is the code review. Batched and parallel
-attribution and priority lanes with the transactional outbox are M4 candidates.
+benchmarks, decision record, pitch and demo runbook) have met their goals and
+M3's code review is done; see [the M3 plan](docs/plan-m3.md). Batched and parallel
+attribution, priority lanes with the transactional outbox, and one email event per tracking
+address are M4 candidates.
 
 This section lags behind the code. Check `cmd/`, `internal/`, `migrations/` and the latest plan
 before concluding something does or doesn't exist.

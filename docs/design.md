@@ -109,7 +109,10 @@ demos, alert emails go to `cmd/mailsink`, a stand-in for SendGrid's Mail Send AP
     **streamed**: attachment parts are read and discarded without being buffered, while every
     byte still feeds the signature hash. Text fields are capped (64 KB each) and the envelope
     records only the attachment count, which keeps the stream small and attachment content
-    (often PII) out of it.
+    (often PII) out of it. The event keeps one value per field within a 96 KB total (subject
+    998 bytes, other small fields 4 KB each, then text, then headers), so even with JSON's
+    6-byte escapes it stays well inside NATS's 1 MB message limit; a larger event could never
+    be published, and SendGrid would retry it until the lead was lost.
   - **Signature:** SendGrid's security policy signs with ECDSA (P-256) over SHA-256 of the
     `X-Twilio-Email-Event-Webhook-Timestamp` header's bytes followed by the raw body, and sends
     the base64 ASN.1 signature in `X-Twilio-Email-Event-Webhook-Signature`. The public key
@@ -221,6 +224,9 @@ a webhook spike, letting work wait in the stream instead.
   accuracy, latency, token cost and Groq's production status
   ([benchmarks](benchmarks.md#model-calibration-m3)). Phone numbers
   and email addresses are stripped before any call, and only synthetic texts are ever sent.
+  An interaction with no text (a call, or the monitor's canary) is stored as `unknown` with
+  model version `no-text` without a call, and only the first 8,000 bytes of a long message are
+  sent, less if needed so one call always fits the budget a minute.
   It is used for **calibration**: a low-rate run measures real p50/p95/p99 latency and where
   `429`s begin, and those numbers replace the stub's guessed load-test profile. A small
   labelled set gives a measured accuracy for both the real model and the stub's rules.
@@ -423,6 +429,7 @@ a failure.
 | **Volume drop** | A partial outage upstream | The last 5 minutes' arrival rate is below 20% of normal, where normal is the **median** of the per-minute rates over the hour before, and is at least 1/s. The median, not the mean: a sustained burst lifts an hour's mean several-fold, so ordinary traffic afterwards would look like an outage |
 | **Acked but not written** | A consumer that stays up and acknowledges messages without writing them | Over 60 s, rows written are below 90% of messages the consumer acknowledged (from its ack floor), with at least 100 acknowledged |
 | **Stale backlog** | A consumer falling too far behind | The oldest pending message is more than 5 minutes old |
+| **Readings failing** | The monitor itself can't see the pipeline (Postgres or NATS down) | Every reading for 30 s has failed. Alerts already firing stay as they are until a reading succeeds; a failed reading is never treated as a reading of zero |
 
 - **Alerts** have firing and resolved states, are logged as structured events, and appear on
   the status page. They go through an `Alerter` interface with three implementations: log
@@ -538,6 +545,14 @@ Decisions and limitations added in M3:
   for a dedicated account with nothing else in it and instances that live under 3 hours. In
   production, use a dedicated VPC with private subnets and Systems Manager VPC endpoints (about
   $0.03/hour for three) or a NAT gateway (about $0.045/hour plus per-GB charges).
+- **An email to several tracking addresses credits one campaign.** The event takes the first
+  SMTP recipient, and `provider_id` is the bare `Message-ID`, so a second address in the same
+  delivery, or a separate delivery of the same message to another address, is dropped as a
+  duplicate. The sender chooses the `Message-ID`, so reusing another email's exact ID would
+  also drop that email. Both are rare: a lead seldom writes to two of a business's tracking
+  addresses at once, and the second needs another email's ID. The fix, an M4 candidate, is one
+  event per tracking address with `provider_id` = `Message-ID` plus that address, which
+  changes the schema contract (found in the M3 code review).
 - **The monitor is a single process.** If it dies, nothing alerts. In production it would run
   outside the system it watches, with its own heartbeat to an external service ("who watches
   the watchdog").
