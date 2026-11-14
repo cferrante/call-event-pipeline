@@ -85,7 +85,7 @@ func routes(cfg config, pub publisher) *http.ServeMux {
 	mux.Handle("POST /webhooks/sms", newWebhook(cfg, envelope.SMS, pub, smsResponse))
 	if cfg.sendgridKey != nil {
 		mux.Handle("POST /webhooks/sendgrid/inbound",
-			&emailWebhook{key: cfg.sendgridKey, pub: pub, now: time.Now, maxBytes: maxEmailBytes})
+			&emailWebhook{key: cfg.sendgridKey, pub: pub, now: time.Now, maxBytes: maxEmailBytes, timeout: emailTimeout})
 	}
 	return mux
 }

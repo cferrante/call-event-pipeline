@@ -214,4 +214,64 @@ func TestEmailRouteNeedsAKey(t *testing.T) {
 	if rec := serve(routes(cfg, &fakePublisher{}), req); rec.Code == http.StatusNotFound {
 		t.Error("with a key: route missing")
 	}
+	// The route carries its own, longer timeout (TestSlowEmailUploadGetsItsResponse).
+	if h, _ := routes(cfg, &fakePublisher{}).Handler(req); h.(*emailWebhook).timeout != emailTimeout {
+		t.Errorf("email route timeout = %v, want %v", h.(*emailWebhook).timeout, emailTimeout)
+	}
+}
+
+// slowReader hands over its first byte, then waits before the rest: an upload on a slow link.
+type slowReader struct {
+	data  []byte
+	pause time.Duration
+	sent  bool
+}
+
+func (r *slowReader) Read(p []byte) (int, error) {
+	if len(r.data) == 0 {
+		return 0, io.EOF
+	}
+	if r.sent {
+		time.Sleep(r.pause)
+	}
+	n := copy(p, r.data[:1])
+	if r.sent {
+		n = copy(p, r.data)
+	}
+	r.sent = true
+	r.data = r.data[n:]
+	return n, nil
+}
+
+// An email may take longer to upload than the server's limits allow other routes. The route
+// extends both the read and the write deadline: if only the read deadline moved, the body
+// would be read and published, but the 200 would miss the write deadline, so SendGrid would
+// see a broken connection and send the same slow upload again.
+func TestSlowEmailUploadGetsItsResponse(t *testing.T) {
+	pub := &fakePublisher{}
+	h, signer := newTestEmailHook(t, pub)
+	h.timeout = 5 * time.Second
+	srv := httptest.NewUnstartedServer(h)
+	srv.Config.ReadTimeout, srv.Config.WriteTimeout = 200*time.Millisecond, 200*time.Millisecond
+	srv.Start()
+	defer srv.Close()
+
+	body, ct := multipartBody(t, emailParts("<slow@example.net>"))
+	req, err := http.NewRequest(http.MethodPost, srv.URL+"/webhooks/sendgrid/inbound",
+		&slowReader{data: body, pause: 500 * time.Millisecond})
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.ContentLength = int64(len(body))
+	req.Header.Set("Content-Type", ct)
+	req.Header.Set(sendgrid.HeaderTimestamp, "1761566400")
+	req.Header.Set(sendgrid.HeaderSignature, signer.Sign("1761566400", body))
+	resp, err := srv.Client().Do(req)
+	if err != nil {
+		t.Fatalf("no response to a slow upload (published %d): %v", len(pub.published), err)
+	}
+	resp.Body.Close()
+	if resp.StatusCode != http.StatusOK || len(pub.published) != 1 {
+		t.Errorf("status %d, published %d; want 200 and 1", resp.StatusCode, len(pub.published))
+	}
 }
