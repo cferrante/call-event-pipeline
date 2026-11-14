@@ -27,6 +27,16 @@ MODEL_TIMEOUT=200ms
 MODEL_JITTER=0.1
 CONF
 
+# JetStream with its default disk sync (every 2 minutes); nats-sync.sh switches it. Kept on a
+# re-run, so a release doesn't silently undo a benchmark's setting.
+[ -f /etc/cep/nats.conf ] || sh /opt/cep/nats-sync.sh default --no-restart
+
+# CPU profiles for the benchmarks, on loopback only (internal/profiling).
+for svc in ingest:6060 attribution:6061; do
+  mkdir -p "/etc/systemd/system/cep@${svc%:*}.service.d"
+  printf '[Service]\nEnvironment=PPROF_ADDR=127.0.0.1:%s\n' "${svc#*:}" >"/etc/systemd/system/cep@${svc%:*}.service.d/pprof.conf"
+done
+
 systemctl daemon-reload
 systemctl restart cep-secrets.service
 

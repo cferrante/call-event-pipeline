@@ -11,10 +11,14 @@
 # Usage: ./loadtest/crash.sh                   kills until the load ends (at least MIN_KILLS)
 #        KILLS=0 ./loadtest/crash.sh           the clean run
 #        RATE=100 DURATION=240s SEED=1 MIN_KILLS=20 ./loadtest/crash.sh
+#        BIN_DIR=/opt/cep/bin ./loadtest/crash.sh   prebuilt services, no Go needed (the AWS
+#                                                  demo: make demo-crash); COMMIT and MACHINE
+#                                                  label the row, RESULTS_ROOT moves the output
 # Exits non-zero if any check fails. Results go to loadtest/results/<timestamp>-crash/.
 set -euo pipefail
 cd "$(dirname "$0")/.."
-set -a; source .env; set +a
+# The demo server has no .env: its caller sets DATABASE_URL.
+if [ -f .env ]; then set -a; source .env; set +a; fi
 
 RATE=${RATE:-100} DURATION=${DURATION:-240s} SEED=${SEED:-1} MIN_KILLS=${MIN_KILLS:-20}
 KILLS=${KILLS:-on} DRAIN_TIMEOUT=${DRAIN_TIMEOUT:-300}
@@ -26,7 +30,7 @@ DB_NAME=leads_crash
 DB_URL="${DATABASE_URL%/*}/${DB_NAME}"
 NATS_URL_CT="nats://127.0.0.1:${NATS_PORT}"
 MODE=$([ "$KILLS" = 0 ] && echo clean || echo crash)
-RESULTS="loadtest/results/$(date +%Y%m%d-%H%M%S)-${MODE}"
+RESULTS="${RESULTS_ROOT:-loadtest/results}/$(date +%Y%m%d-%H%M%S)-${MODE}"
 WORK=$(mktemp -d)
 mkdir -p "$RESULTS"
 loops=()
@@ -91,8 +95,13 @@ for port in $NATS_PORT $MON_PORT $INGEST_PORT; do
   if ss -ltn | grep -qE ":${port}\b"; then log "port ${port} is in use; stop whatever uses it"; exit 1; fi
 done
 
-log "building services"
-for svc in ingest attribution inference; do go build -o "$WORK/$svc" "./cmd/$svc"; done
+if [ -n "${BIN_DIR:-}" ]; then
+  log "using the services in $BIN_DIR"
+  for svc in ingest attribution inference; do cp "$BIN_DIR/$svc" "$WORK/$svc"; done
+else
+  log "building services"
+  for svc in ingest attribution inference; do go build -o "$WORK/$svc" "./cmd/$svc"; done
+fi
 psql -X -q "$DATABASE_URL" -c "DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)" -c "CREATE DATABASE ${DB_NAME}"
 
 log "starting nats-server, attribution, inference and ingest under restart loops"
@@ -220,9 +229,13 @@ check() {
 } >"$RESULTS/report.txt"
 cat "$RESULTS/report.txt"
 
-commit=$(git rev-parse --short HEAD)
-[ -n "$(git status --porcelain)" ] && commit="${commit}+dirty"
-machine="$(nproc) CPU, $(grep -qi microsoft /proc/version && echo 'Ubuntu WSL2' || uname -s)"
+if [ -n "${COMMIT:-}" ]; then
+  commit=$COMMIT
+else
+  commit=$(git rev-parse --short HEAD)
+  [ -n "$(git status --porcelain)" ] && commit="${commit}+dirty"
+fi
+machine=${MACHINE:-"$(nproc) CPU, $(grep -qi microsoft /proc/version && echo 'Ubuntu WSL2' || uname -s)"}
 echo
 echo "Row for docs/benchmarks.md:"
 echo "| $(date +%F) | \`${commit}\` | ${machine} | ${MODE}, ${RATE}/s for ${DURATION}, seed ${SEED} | ${kills} | ${ITERATIONS} | ${RETRIES} |" \

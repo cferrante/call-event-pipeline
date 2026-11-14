@@ -28,6 +28,9 @@ act "building the release for linux/arm64"
 rm -rf "$build/release" && mkdir -p "$build/release/bin" "$build/cache"
 (cd "$root" && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -o "$build/release/bin/" \
   ./cmd/ingest ./cmd/attribution ./cmd/inference ./cmd/monitor ./cmd/mailsink ./cmd/sendhook)
+# The drill build (make demo-fault): only swapped in for the drill, never run otherwise.
+(cd "$root" && GOOS=linux GOARCH=arm64 CGO_ENABLED=0 go build -trimpath -tags faultinject \
+  -o "$build/release/bin/attribution-fault" ./cmd/attribution)
 nats="nats-server-$NATS_VERSION-linux-arm64"
 if [[ ! -f $build/cache/$nats.tar.gz ]]; then
   curl -fsSL -o "$build/cache/$nats.tar.gz" \
@@ -44,7 +47,11 @@ echo "$K6_SHA256  $build/cache/$k6.tar.gz" | sha256sum -c --quiet - || die "k6 c
 tar -xzf "$build/cache/$k6.tar.gz" -C "$build/cache" "$k6/k6"
 cp "$build/cache/$k6/k6" "$build/release/bin/"
 cp -r "$demo/deploy/." "$build/release/"
-cp "$root/loadtest/spike.js" "$build/release/"
+cp "$root/loadtest/spike.js" "$root/loadtest/stepup.js" "$build/release/"
+# The crash test runs from the release on the server (make demo-crash); it counts migrations.
+mkdir -p "$build/release/loadtest" "$build/release/migrations"
+cp "$root/loadtest/crash.sh" "$root/loadtest/crash.js" "$build/release/loadtest/"
+cp "$root"/migrations/*.sql "$build/release/migrations/"
 tar -czf "$build/release.tar.gz" -C "$build/release" .
 aws s3 cp --only-show-errors "$build/release.tar.gz" "s3://$bucket/release.tar.gz"
 ok "release uploaded ($(du -h "$build/release.tar.gz" | cut -f1))"
