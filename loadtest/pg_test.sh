@@ -2,6 +2,9 @@
 # Tests that the load tests never put the database password on a command line, where any
 # local user can read it (ps, /proc/<pid>/cmdline): pg_use's parsing, and a check of the
 # scripts themselves. Offline; no database needed.
+# With DATABASE_URL set, it also checks pg_recreate_db and pg_drop_db against that server,
+# using a throwaway database named leads_pgtest. REQUIRE_DB=1 (set in CI) makes a missing
+# DATABASE_URL a failure instead of a skip.
 set -uo pipefail
 cd "$(dirname "$0")" || exit 1
 fails=0
@@ -35,5 +38,40 @@ for f in run.sh crash.sh; do
   [ -z "$hits" ] && ok "$f passes no database URL as an argument" || bad "$f passes a database URL as an argument:
 $hits"
 done
+
+# Both scripts recreate and drop their database through the helpers, never a raw DROP, so a
+# routine NOTICE can't reach the output.
+for f in run.sh crash.sh; do
+  hits=$(grep -n 'DROP DATABASE' "$f" || true)
+  [ -z "$hits" ] && ok "$f drops databases only through pg.sh" || bad "$f runs DROP DATABASE itself:
+$hits"
+done
+
+if [ -z "${DATABASE_URL:-}" ]; then
+  if [ "${REQUIRE_DB:-}" = 1 ]; then bad "REQUIRE_DB=1 but DATABASE_URL is unset"
+  else echo "  - skipped the database checks: DATABASE_URL is unset"; fi
+else
+  (
+    pg_use "$DATABASE_URL" || exit 1
+    db=leads_pgtest pass=0
+    exists() { [ "$(psql -X -A -t -c "SELECT count(*) FROM pg_database WHERE datname = '$db'")" = 1 ]; }
+    check() { if eval "$2"; then ok "$1"; else bad "$1"; pass=1; fi; }
+    psql -X -q -c "DROP DATABASE IF EXISTS $db" 2>/dev/null
+
+    err=$(pg_recreate_db "$db" 2>&1 >/dev/null); rc=$?
+    check "pg_recreate_db creates a missing database without a NOTICE" '[ $rc = 0 ] && [ -z "$err" ] && exists'
+    PGDATABASE=$db psql -X -q -c "CREATE TABLE leftover (x int)"
+    err=$(pg_recreate_db "$db" 2>&1 >/dev/null); rc=$?
+    left=$(PGDATABASE=$db psql -X -A -t -c "SELECT count(*) FROM pg_tables WHERE tablename = 'leftover'")
+    check "pg_recreate_db replaces an existing database with an empty one" '[ $rc = 0 ] && [ -z "$err" ] && [ "$left" = 0 ]'
+    err=$(pg_drop_db "$db" 2>&1 >/dev/null); rc=$?
+    check "pg_drop_db drops the database" '[ $rc = 0 ] && [ -z "$err" ] && ! exists'
+    err=$(pg_drop_db "$db" 2>&1 >/dev/null); rc=$?
+    check "pg_drop_db on a missing database prints nothing" '[ $rc = 0 ] && [ -z "$err" ]'
+    err=$(pg_recreate_db "no such-name" 2>&1 >/dev/null); rc=$?
+    check "pg_recreate_db still reports real errors" '[ $rc != 0 ] && [ -n "$err" ]'
+    exit $pass
+  ) || fails=$((fails + 1))
+fi
 
 [ "$fails" = 0 ] && echo "all passed" || { echo "$fails failed"; exit 1; }

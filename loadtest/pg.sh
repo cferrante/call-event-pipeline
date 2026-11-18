@@ -18,3 +18,18 @@ pg_use() {
   printf -v PGPASSWORD '%b' "${pass//%/\\x}"
   if [ -n "$host" ]; then export PGHOST=$host; else unset PGHOST; fi
 }
+
+# The helpers below hide Postgres's NOTICEs for their own session only, such as
+# 'database "x" does not exist, skipping' from DROP ... IF EXISTS on a fresh run. A NOTICE is
+# routine but reads like a failure in the output; warnings and errors still print.
+_pg_quiet() { psql -X -q -v ON_ERROR_STOP=1 -c "SET client_min_messages = warning" "$@"; }
+
+# pg_recreate_db <name>: drop the database if it exists and create it empty.
+pg_recreate_db() {
+  _pg_quiet -c "DROP DATABASE IF EXISTS $1 WITH (FORCE)" -c "CREATE DATABASE $1"
+}
+
+# pg_drop_db <name>: drop the database if it exists.
+pg_drop_db() {
+  _pg_quiet -c "DROP DATABASE IF EXISTS $1 WITH (FORCE)"
+}
