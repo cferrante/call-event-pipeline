@@ -48,7 +48,7 @@ cleanup() {
   done
   for pid in "${loops[@]}"; do kill "$pid" 2>/dev/null || true; done
   wait 2>/dev/null || true
-  psql -X -q -c "DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)" || true
+  pg_drop_db "$DB_NAME" || true
   rm -rf "$WORK"
 }
 trap cleanup EXIT
@@ -104,7 +104,7 @@ else
   log "building services"
   for svc in ingest attribution inference; do go build -o "$WORK/$svc" "./cmd/$svc"; done
 fi
-psql -X -q -c "DROP DATABASE IF EXISTS ${DB_NAME} WITH (FORCE)" -c "CREATE DATABASE ${DB_NAME}"
+pg_recreate_db "$DB_NAME"
 
 log "starting nats-server, attribution, inference and ingest under restart loops"
 supervise nats nats-server -js -sd "$WORK/nats" -a 127.0.0.1 -p $NATS_PORT -m $MON_PORT

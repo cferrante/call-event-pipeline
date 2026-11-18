@@ -54,10 +54,6 @@ jobs:
         # Offline, as above. The plan check's own tests run with the unit tests.
         run: ./infra/demo/check_test.sh
 
-      - name: Load test script tests
-        # Offline: the database password never goes on a command line.
-        run: ./loadtest/pg_test.sh
-
       - name: Install nats-server
         run: |
           file="nats-server-${NATS_SERVER_VERSION}-linux-amd64"
@@ -78,6 +74,13 @@ jobs:
           CREATE ROLE leads_app WITH LOGIN NOSUPERUSER CREATEDB PASSWORD :'pw';
           SQL
           echo "DATABASE_URL=postgres://leads_app:$pw@127.0.0.1:5432/postgres" >> "$GITHUB_ENV"
+
+      - name: Load test script tests
+        # The database password never goes on a command line, and the database helpers run
+        # against the real Postgres. REQUIRE_DB stops them from skipping.
+        env:
+          REQUIRE_DB: "1"
+        run: ./loadtest/pg_test.sh
 
       - name: Integration and end-to-end tests
         # REQUIRE_INTEGRATION turns "dependency missing" skips into failures, so this step
