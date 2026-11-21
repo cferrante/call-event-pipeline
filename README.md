@@ -1,148 +1,106 @@
 # Call event pipeline
 
-Real-time ingestion for inbound voice, SMS and email leads: every call, text and email is captured and
-attributed to its marketing campaign within milliseconds, and the system absorbs large spikes
-in webhook traffic without slowing down downstream AI inference.
+A real-time pipeline that captures every inbound call, text and email lead, credits it to the
+marketing campaign that produced it, and has an AI model sort sales inquiries from support
+questions. It's built to lose nothing, even during a sudden spike in traffic.
+
+## Why
+
+When a TV spot airs or a campaign takes off, contacts arrive in a rush, and that's exactly when
+a business can least afford to lose one. Lead systems tend to fail in one of two ways under a
+rush: webhooks time out and leads vanish, or everything slows down, including the AI that
+decides which contacts are sales leads.
+
+This project shows a design that avoids both, and proves it with measurements rather than
+claims.
 
 ## How it works
 
-Webhooks are acknowledged as soon as they're durably stored in a stream. All real work happens
-afterwards, in independent consumers that each run at their own pace:
+```
+call, text or email webhook
+        │
+        ▼
+  ingest edge ─── verifies the signature, stores the event, then answers 200
+        │
+        ▼
+  NATS JetStream (durable stream) ───► dead-letter stream for events that can't be processed
+        ├──► attribution ───► Postgres    which campaign produced this contact?
+        └──► AI inference ──► Postgres    sales, support or neither?
 
-    webhook ─► ingest edge ─► NATS JetStream ─┬─► attribution ─► Postgres
-                                              └─► AI inference ─► Postgres
+  monitor ─── sends test webhooks, checks they're saved, emails an alert if not
+```
 
-A traffic spike shows up as a temporary backlog in the stream, not as dropped webhooks or a
-slower AI model.
+Four ideas carry the design:
 
-New to NATS or JetStream? Start with the [concepts guide](docs/concepts.md).
+- **Acknowledge only what's safe.** The edge answers the provider only once the event is
+  durably stored, in about a millisecond. All slower work happens afterwards.
+- **Each consumer keeps its own pace.** Attribution and AI inference read the stream
+  independently, so a slow model can't hold up attribution, and neither can hold up the edge.
+  A spike becomes a short backlog in the stream instead of lost leads.
+- **Protect the model.** Inference runs a fixed number of requests at a time, so the model's
+  response time stays level under load and the backlog waits safely in the stream.
+- **Count every contact once.** Delivery is at-least-once, so every write is idempotent: an
+  event delivered twice is still stored once.
 
-## Stack
+The call, SMS and email providers (Twilio and SendGrid) are simulated against their published
+webhook contracts, including signature checks, so the system runs end to end without real
+accounts. New to NATS or JetStream? The [concepts guide](docs/concepts.md) explains the terms.
 
-Go · NATS JetStream · PostgreSQL · k6 (load testing). Everything runs natively on Ubuntu
-(WSL2), with no Docker, using free and open-source tools.
+## What's proven
+
+Measured on AWS servers on 14 November 2026; the method and raw results are in the
+[benchmarks](docs/benchmarks.md).
+
+| Claim | Result |
+|---|---|
+| A spike loses nothing | Three spikes of 1,000 contacts a second: all 67,799 stored exactly once each time; the backlog cleared about 2 minutes after the spike ended |
+| The edge stays fast | About 1 ms per webhook, and it kept up with at least 4,000 a second, the most the load generator could send |
+| The AI keeps its pace | Model response time held within 4% during a spike; without the limit, the same spike made it 17 times slower |
+| Crashes lose nothing | 23 forced kills (`kill -9`) under load; the data afterwards was identical to a run with no kills |
+| Silent failures are caught | A consumer that kept running but stopped saving was detected and emailed within 5–7 seconds; replay restored every missed event |
+| The AI is accurate | A hosted model labelled 47 of 48 synthetic test messages correctly (98%), against 54% for keyword rules |
+
+The load tests use a stand-in model calibrated from a real one, so they cost nothing to run;
+the accuracy figure comes from the real hosted model.
 
 ## Status
 
-Milestones 1, 2 and 3 have met their goals; M3's final code review is its last step. Results
-were measured on AWS as well as a laptop (see [benchmarks](docs/benchmarks.md)), and the
-[pitch](docs/pitch.md) tells the story in one page. See the [design spec](docs/design.md) for the
-architecture and decisions, and the [M1](docs/plan-m1.md), [M2](docs/plan-m2.md) and
-[M3](docs/plan-m3.md) plans for how each was built.
+Milestones 1 to 3 are complete:
 
-- **M1:** ingest edge, attribution consumer, dead-letter handling, spike test proving zero
-  loss and zero duplicates
-- **M2:** AI inference consumer with backpressure, so inference latency stays flat under load
-- **M3:** email channel and schema contract; a silent-failure monitor that emails alerts, with
-  replay recovery; a crash test (23 `kill -9`s, data identical); an on-demand AWS environment
-  and server benchmarks; the [event stream decision](docs/decisions/0001-event-stream.md) and a
-  [postmortem](docs/postmortems/2026-11-14-silent-write-failure.md). To show it live, follow
-  the [10-minute demo](docs/demo.md)
-- **M4 (candidate):** batched and parallel attribution; priority lanes with the transactional
-  outbox
+- **M1:** ingest edge, attribution, dead-letter handling, and a spike test proving zero loss
+  and zero duplicates.
+- **M2:** AI inference with a limit on concurrent requests, so model latency stays flat under
+  load.
+- **M3:** email channel and a versioned event schema; a silent-failure monitor with email
+  alerts and replay recovery; the crash test; an on-demand AWS environment and server
+  benchmarks.
 
-## Running locally
+Next candidates: batched attribution (today about 620 contacts a second, saved one at a time)
+and a priority lane so urgent sales leads skip a backlog.
 
-Needs Go, `nats-server` and PostgreSQL installed natively (see
-[plan step 0](docs/plan-m1.md#step-0-install-the-local-toolchain-no-code)).
+## Stack
 
-**One-time setup**
+Go · NATS JetStream · PostgreSQL · k6 for load testing · OpenTofu for the AWS environment.
+Everything runs natively on Linux, without Docker, using free and open-source tools.
 
-```bash
-./scripts/db-setup.sh   # creates .env with random secrets, the leads_app role and database
-```
+## Try it
 
-**Run** (each in its own terminal, from the project folder; run `set -a; source .env; set +a`
-in each terminal first)
+Run it on your own machine with [running locally](docs/running.md): setup, the services, a few
+signed test webhooks, the silent-failure drill and the tests.
 
-```bash
-nats-server -js -sd ./data/nats -m 8222   # 1. message broker, data kept in ./data
-go run ./cmd/attribution                  # 2. applies migrations, then consumes events
-go run ./cmd/inference                    # 3. classifies events with the (stub) AI model
-go run ./cmd/ingest                       # 4. webhook endpoint on $INGEST_PORT
-go run ./cmd/monitor                      # 5. alerts + status page on http://127.0.0.1:8090
-go run ./cmd/mailsink                     # 6. receives the monitor's alert emails
-```
+A hosted live demo on AWS is planned. Until it's up, the [10-minute demo runbook](docs/demo.md)
+walks through it step by step, with the expected result of each step.
 
-Stop any of them with Ctrl-C; each finishes in-flight work first.
+## How it was built
 
-If inference refuses to start because its consumer "already exists with a different start
-position" (one created before it started at new messages), run it once as
-`go run ./cmd/inference -reset-consumer`.
+Spec first, then a step-by-step plan, then code, written test-first with
+[Claude Code](https://claude.com/claude-code) as the coding agent. Each milestone closed with a
+code review, and its findings and outcomes are recorded in that milestone's plan. Integration tests run against real NATS and Postgres rather than mocks.
 
-The monitor sends a signed "canary" webhook every 10 seconds and alerts (in its log and on
-its status page) if the canary stops arriving, traffic drops far below normal, a consumer
-acknowledges messages without writing them, or a backlog stops draining. The page listens on
-`127.0.0.1` only, since it has no login.
-
-Alerts are also emailed through SendGrid's Mail Send API. Locally that is `cmd/mailsink`, which
-checks each request against SendGrid's documented contract, answers `202` as SendGrid does, and
-keeps the messages: `curl -s 127.0.0.1:8025/messages`. The status page's **Outbox** shows each
-alert email and how delivery went (sent, retrying after a `429` or `5xx`, or failed). Unset
-`ALERT_EMAIL_TO` to turn email off.
-
-**Try it**
-
-```bash
-go run ./cmd/sendhook                 # a signed fake voice webhook → 200
-go run ./cmd/sendhook -channel sms    # an SMS
-go run ./cmd/sendhook -bad-signature  # → 403
-psql "$DATABASE_URL" -c 'SELECT provider_id, source, lead_id FROM interactions'
-psql "$DATABASE_URL" -c 'SELECT * FROM campaign_conversations'   # conversations per campaign
-go run ./cmd/sendhook -channel sms -body "what's the price?"      # an SMS the model classifies as sales
-psql "$DATABASE_URL" -c 'SELECT provider_id, intent, score, model_ms FROM insights'
-go run ./cmd/sendhook -channel email -subject "Price?" -attach-bytes 200000  # a signed SendGrid-style email
-psql "$DATABASE_URL" -c "SELECT provider_id, channel, to_address, source FROM interactions WHERE channel = 'email'"
-```
-
-Calls to numbers missing from `tracking_numbers` are attributed to `unknown`. Add one with
-`INSERT INTO tracking_numbers (phone_e164, campaign_id, source) VALUES ('+18005550001', 'search-fall', 'google');`
-Emails are credited through `tracking_addresses` the same way:
-`INSERT INTO tracking_addresses (address, campaign_id, source) VALUES ('search-fall@leads.example.com', 'search-fall', 'google');`
-
-Email is simulated against SendGrid's Inbound Parse contract: `scripts/env-setup.sh` generates a
-key pair, `sendhook` signs with the private key and ingest verifies with the public one
-(`SENDGRID_PUBLIC_KEY`; without it the email route is off).
-
-**Drill: a silent failure**
-
-A build with the `faultinject` tag lets you break attribution on purpose: `SIGUSR1` makes it
-acknowledge events without writing them, so it stays up with zero lag while nothing reaches
-Postgres. Normal builds don't contain this code.
-
-```bash
-go build -tags faultinject -o /tmp/attribution-drill ./cmd/attribution
-/tmp/attribution-drill                      # in place of go run ./cmd/attribution
-pkill -USR1 -f attribution-drill            # fault on; again to turn it off
-```
-
-With traffic flowing, the monitor fires *acked but not written* (and, 30 s later, *arrivals
-stopped*, since the canary's rows aren't written either) and emails the alert to the mail sink.
-
-To recover, turn the fault off and replay the stream from just before it started. Only the
-missing rows are written, and attribution can keep running meanwhile:
-
-```bash
-go run ./cmd/attribution -replay-from 2026-11-13T09:30:00Z   # logs read, recorded, already_recorded
-```
-
-**Test**
-
-```bash
-go test ./...                     # unit tests; no services needed
-go test -tags integration -count=1 ./...   # plus integration and end-to-end tests; needs .env loaded
-./loadtest/run.sh                 # spike test (needs k6), isolated from your dev data
-MODE=control ./loadtest/run.sh    # same spike without the inference limit: the model overloads
-./loadtest/crash.sh               # kill -9 random services under load (~5 min); data must be exact
-KILLS=0 ./loadtest/crash.sh       # the same load without kills: the clean run
-```
-
-Integration tests start their own NATS server and throwaway databases. `-count=1` turns off
-Go's test cache, which can't see what these tests depend on (the services they build and run,
-NATS, Postgres) and would otherwise report a stale `ok`. Without `.env` loaded
-they are skipped, which `go test` reports as `ok`; add `-v` to see `SKIP`.
-
-## Why this project
-
-A learning project for event-driven architecture and current best practices for absorbing
-webhook spikes: durable streams, at-least-once delivery, idempotency, and backpressure.
+| Read this | For |
+|---|---|
+| [One-page summary](docs/pitch.md) | The problem, results and costs, for a non-technical reader |
+| [Design spec](docs/design.md) | Architecture, event schema, data model and delivery guarantees |
+| [Decision record](docs/decisions/0001-event-stream.md) | Why NATS JetStream over Kafka and Kinesis, with monthly costs |
+| [Postmortem](docs/postmortems/2026-11-14-silent-write-failure.md) | A silent write failure: how it was detected and recovered |
+| Plans for [M1](docs/plan-m1.md), [M2](docs/plan-m2.md), [M3](docs/plan-m3.md) | Each step, the test that had to fail first, deviations and review outcomes |

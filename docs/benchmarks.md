@@ -1,7 +1,7 @@
 # Benchmarks
 
 Spike-test results over time, so the effect of a change can be measured rather than guessed.
-Run with `./loadtest/run.sh` (see the [README](../README.md#running-locally)); it ends by printing
+Run with `./loadtest/run.sh` (see [running locally](running.md#test)); it ends by printing
 a row for this table. Add a row for baselines and for runs that test a change, and say what
 changed. Raw output (logs, `lag.csv`) stays in the git-ignored `loadtest/results/`.
 

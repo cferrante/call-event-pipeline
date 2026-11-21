@@ -99,7 +99,7 @@ that fail again, and the backlog takes *longer* to drain despite 50 times the wo
 ## Life of an incident
 
 What happens when part of the pipeline breaks without crashing (milestone 3). This is the drill
-in the README, played out step by step.
+in the [running guide](running.md#drill-a-silent-failure), played out step by step.
 
 **1. A silent failure.** Attribution keeps running, passes its health check and keeps up with
 the stream, but a bug means it [acks](#ack) messages without writing them. Nothing errors,

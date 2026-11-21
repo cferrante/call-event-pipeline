@@ -37,7 +37,8 @@ before concluding something does or doesn't exist.
 - `docs/decisions/` holds decision records; `docs/postmortems/` incident write-ups.
 - `docs/demo.md` is the 10-minute demo on AWS; `docs/pitch.md` the one-page summary for a
   non-technical reader.
-- `README.md` is the entry point for running and trying the system.
+- `README.md` is the entry point: what the system is, why, and what it proves.
+  `docs/running.md` is how to run, try and test it locally.
 
 ## How we work
 
