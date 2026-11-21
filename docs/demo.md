@@ -126,6 +126,6 @@ crashes with identical data, detection in seconds against a one-minute goal.
 ## Without AWS
 
 The same story runs on a laptop at $0: start the services as in the
-[README](../README.md#running-locally), send a spike with `./loadtest/run.sh`, and run the drill
-from the README's *Drill: a silent failure* steps. The numbers differ from the server's; the
+[local setup](running.md), send a spike with `./loadtest/run.sh`, and run the
+[silent-failure drill](running.md#drill-a-silent-failure). The numbers differ from the server's; the
 [benchmarks](benchmarks.md) say by how much.

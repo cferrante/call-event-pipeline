@@ -7,7 +7,7 @@ import (
 	"os"
 )
 
-// DefaultNATSURL is the local NATS server started as in the README.
+// DefaultNATSURL is the local NATS server started as in docs/running.md.
 const DefaultNATSURL = "nats://127.0.0.1:4222"
 
 // NATSURL returns NATS_URL, or the local default.
