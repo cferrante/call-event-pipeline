@@ -128,7 +128,7 @@ func TestAnonymousCaller(t *testing.T) {
 		want bool
 	}{
 		{"+14158675310", false},
-		{"+442071838750", false},
+		{"+442079460958", false},
 		{"", true},
 		{"anonymous", true},
 		{"Anonymous", true},
@@ -218,7 +218,7 @@ func TestParseRejectsInvalidEvents(t *testing.T) {
 func TestIsE164(t *testing.T) {
 	tests := map[string]bool{
 		"+14158675310":      true,
-		"+442071838750":     true,
+		"+442079460958":     true,
 		"14158675310":       false, // no +
 		"+04158675310":      false, // country codes don't start with 0
 		"+1 415 867 5310":   false,
